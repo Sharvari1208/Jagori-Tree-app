@@ -1341,8 +1341,16 @@ export default function App() {
       if (Platform.OS === 'web') {
         await Print.printAsync({ html: htmlContent });
       } else {
-        const { uri } = await Print.printToFileAsync({ html: htmlContent });
-        await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+        try {
+          const { uri } = await Print.printToFileAsync({ html: htmlContent });
+          if (await Sharing.isAvailableAsync()) {
+            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+          } else {
+            await Print.printAsync({ html: htmlContent });
+          }
+        } catch (_fileErr) {
+          await Print.printAsync({ html: htmlContent });
+        }
       }
     } catch (_error) {
       Alert.alert('Error', 'Unable to create or share printable tag.');
@@ -1693,13 +1701,18 @@ export default function App() {
       if (Platform.OS === 'web') {
         await Print.printAsync({ html: fullHtml });
       } else {
-        const { uri } = await Print.printToFileAsync({ html: fullHtml });
-        if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(uri, {
-            UTI: '.pdf',
-            mimeType: 'application/pdf',
-            dialogTitle: `Jagori Tree QR Sheet (${dateLabel})`,
-          });
+        try {
+          const { uri } = await Print.printToFileAsync({ html: fullHtml });
+          if (await Sharing.isAvailableAsync()) {
+            await Sharing.shareAsync(uri, {
+              mimeType: 'application/pdf',
+              dialogTitle: `Jagori Tree QR Sheet (${dateLabel})`,
+            });
+          } else {
+            await Print.printAsync({ html: fullHtml });
+          }
+        } catch (_fileErr) {
+          await Print.printAsync({ html: fullHtml });
         }
       }
     } catch (err) {
