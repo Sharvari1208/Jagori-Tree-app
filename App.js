@@ -23,6 +23,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as ImagePicker from 'expo-image-picker';
 import QRCode from 'react-native-qrcode-svg';
+import * as XLSX from 'xlsx';
 import { supabase, isSupabaseConfigured } from './supabase';
 
 // Local Storage Keys for Offline Resilience
@@ -541,87 +542,106 @@ export default function App() {
   };
 
 
-  // Export Complete Tree Registry to CSV for Donors & Government Audits
-  const handleExportCSV = async () => {
+  // Export Complete Tree Registry directly to Excel (.xlsx) for Donors, Audits & Records
+  const handleExportExcel = async () => {
     if (!trees || trees.length === 0) {
       Alert.alert('Export Notice', 'No tree records available to export.');
       return;
     }
 
-    const headers = [
-      'Tree ID',
-      'Species',
-      'Plantation Date',
-      'Latitude',
-      'Longitude',
-      'Village',
-      'Donor / Caretaker',
-      'Height',
-      'Girth',
-      'Health Status',
-      'Last Inspection Date',
-      'Public Verification URL',
-    ];
+    try {
+      // 1. Prepare structured data array with standard Excel columns
+      const excelData = trees.map((t, idx) => ({
+        'S.No': idx + 1,
+        'Tree ID': t.treeId || '',
+        'Species': t.species || '',
+        'Plantation Date': t.plantationDate || '',
+        'Latitude': t.lat || '',
+        'Longitude': t.lng || '',
+        'Village / Habitat': t.village || '',
+        'Donor / Caretaker': t.donorName || '',
+        'Height': t.height || '',
+        'Girth': t.girth || '',
+        'Health Status': t.survivalStatus || '',
+        'Last Inspection Date': t.lastInspection || '',
+        'Public Verification URL': t.url || '',
+      }));
 
-    const rows = trees.map((t) => [
-      `"${(t.treeId || '').replace(/"/g, '""')}"`,
-      `"${(t.species || '').replace(/"/g, '""')}"`,
-      `"${(t.plantationDate || '').replace(/"/g, '""')}"`,
-      `"${(t.lat || '').replace(/"/g, '""')}"`,
-      `"${(t.lng || '').replace(/"/g, '""')}"`,
-      `"${(t.village || '').replace(/"/g, '""')}"`,
-      `"${(t.donorName || '').replace(/"/g, '""')}"`,
-      `"${(t.height || '').replace(/"/g, '""')}"`,
-      `"${(t.girth || '').replace(/"/g, '""')}"`,
-      `"${(t.survivalStatus || '').replace(/"/g, '""')}"`,
-      `"${(t.lastInspection || '').replace(/"/g, '""')}"`,
-      `"${(t.url || '').replace(/"/g, '""')}"`,
-    ]);
+      // 2. Build Excel Worksheet & Workbook
+      const ws = XLSX.utils.json_to_sheet(excelData);
 
-    const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
+      // Auto-fit column widths for a polished Excel presentation
+      ws['!cols'] = [
+        { wch: 6 },  // S.No
+        { wch: 18 }, // Tree ID
+        { wch: 24 }, // Species
+        { wch: 16 }, // Plantation Date
+        { wch: 14 }, // Latitude
+        { wch: 14 }, // Longitude
+        { wch: 20 }, // Village
+        { wch: 22 }, // Donor
+        { wch: 12 }, // Height
+        { wch: 12 }, // Girth
+        { wch: 16 }, // Health Status
+        { wch: 18 }, // Last Inspection
+        { wch: 45 }, // Public URL
+      ];
 
-    if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof document !== 'undefined') {
-      try {
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.setAttribute('href', url);
-        link.setAttribute('download', `jagori_trees_registry_${todayStr}.csv`);
-        document.body.appendChild(link);
-        link.click();
-        setTimeout(() => {
-          if (link.parentNode) document.body.removeChild(link);
-          URL.revokeObjectURL(url);
-        }, 300);
-        Alert.alert('CSV Exported', `Downloaded jagori_trees_registry_${todayStr}.csv`);
-      } catch (webErr) {
-        console.warn('Web CSV export fallback:', webErr);
-        const encoded = encodeURI('data:text/csv;charset=utf-8,' + csvContent);
-        window.open(encoded, '_blank');
-      }
-    } else {
-      try {
-        const fileName = `jagori_trees_registry_${todayStr}.csv`;
-        const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
-        await FileSystem.writeAsStringAsync(fileUri, csvContent, {
-          encoding: FileSystem.EncodingType.UTF8,
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Tree Registry');
+      const base64Data = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+      const excelFileName = `export_excel_${todayStr}.xlsx`;
+
+      // 3. Web Platform Download
+      if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof document !== 'undefined') {
+        try {
+          const byteCharacters = atob(base64Data);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], {
+            type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.setAttribute('href', url);
+          link.setAttribute('download', excelFileName);
+          document.body.appendChild(link);
+          link.click();
+          setTimeout(() => {
+            if (link.parentNode) document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+          }, 400);
+          Alert.alert('Excel Exported', `Downloaded ${excelFileName}`);
+        } catch (webErr) {
+          console.warn('Web Excel export error:', webErr);
+          Alert.alert('Export Notice', 'Unable to initiate download in browser.');
+        }
+      } else {
+        // 4. Mobile Platform (Android & iOS)
+        const fileUri = `${FileSystem.cacheDirectory}${excelFileName}`;
+        await FileSystem.writeAsStringAsync(fileUri, base64Data, {
+          encoding: FileSystem.EncodingType.Base64,
         });
 
         if (await Sharing.isAvailableAsync()) {
           await Sharing.shareAsync(fileUri, {
-            mimeType: 'text/csv',
-            dialogTitle: 'Export Jagori Trees Registry (CSV)',
-            UTI: 'public.comma-separated-values-text',
+            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            dialogTitle: 'Export Excel',
+            UTI: 'org.openxmlformats.spreadsheetml.sheet',
           });
         } else {
-          Alert.alert('Export Successful', `CSV file created at: ${fileUri}`);
+          Alert.alert('Export Successful', `Excel file saved to: ${fileUri}`);
         }
-      } catch (err) {
-        console.warn('Mobile CSV export error:', err);
-        Alert.alert('Export Notice', `Could not export CSV: ${err.message || err}`);
       }
+    } catch (err) {
+      console.warn('Excel export error:', err);
+      Alert.alert('Export Error', `Could not export Excel: ${err.message || err}`);
     }
   };
+
 
   // Initialize Registry: Load local cache first, then sync with Supabase Cloud
   useEffect(() => {
@@ -2119,9 +2139,9 @@ export default function App() {
 
                 <TouchableOpacity
                   style={styles.csvExportBtn}
-                  onPress={handleExportCSV}
+                  onPress={handleExportExcel}
                 >
-                  <Text style={styles.csvExportBtnText}>📥 Export CSV</Text>
+                  <Text style={styles.csvExportBtnText}>📊 Export Excel</Text>
                 </TouchableOpacity>
 
               </View>
