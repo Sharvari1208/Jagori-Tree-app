@@ -1160,16 +1160,63 @@ export default function App() {
     }
   };
 
-  // Export Printable PDF Slip
+  // Download or Share High-Resolution QR Code Image Directly (PNG)
+  const handleDownloadQrImage = async (tree) => {
+    if (!tree) return;
+    const qrData =
+      qrCodeType === 'OFFLINE'
+        ? (tree.qrText || buildTreeQrText(tree))
+        : (tree.url || buildPublicTreeUrl(tree.treeId));
+    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&ecc=M&margin=1&data=${encodeURIComponent(
+      qrData
+    )}`;
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      try {
+        const link = document.createElement('a');
+        link.href = qrImageUrl;
+        link.download = `QR_${tree.treeId}.png`;
+        link.target = '_blank';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } catch {
+        window.open(qrImageUrl, '_blank');
+      }
+      return;
+    }
+
+    try {
+      const filename = `QR_${tree.treeId.replace(/[^a-zA-Z0-9_-]/g, '_')}.png`;
+      const localUri = `${FileSystem.cacheDirectory}${filename}`;
+      const downloadRes = await FileSystem.downloadAsync(qrImageUrl, localUri);
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(downloadRes.uri, {
+          mimeType: 'image/png',
+          dialogTitle: `Save QR Code - ${tree.treeId}`,
+          UTI: 'public.png',
+        });
+      } else {
+        Alert.alert('Downloaded', `QR Code downloaded to: ${downloadRes.uri}`);
+      }
+    } catch (err) {
+      console.warn('Error downloading QR image:', err);
+      Alert.alert('Download Error', 'Could not save QR image. Opening browser image instead.');
+      Linking.openURL(qrImageUrl);
+    }
+  };
+
+  // Export Printable Single Tree QR Tag (PDF) - Same clean format as sheets with crystal-clear 800x800 QR
   const handleExportPDF = async (treeToExport) => {
     if (!treeToExport) return;
 
     const qrData =
       qrCodeType === 'OFFLINE'
         ? (treeToExport.qrText || buildTreeQrText(treeToExport))
-        : treeToExport.url;
+        : (treeToExport.url || buildPublicTreeUrl(treeToExport.treeId));
 
-    const qrImageSvg = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(
+    // High resolution 800x800 source image with Medium error correction & tight margin for maximum sharpness
+    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=800x800&ecc=M&margin=1&data=${encodeURIComponent(
       qrData
     )}`;
 
@@ -1177,180 +1224,138 @@ export default function App() {
       <!DOCTYPE html>
       <html>
         <head>
+          <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>Jagori Tree Tag - ${escapeHtml(treeToExport.treeId)}</title>
           <style>
-            * { box-sizing: border-box; }
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            @page {
+              size: A4 portrait;
+              margin: 10mm;
+            }
             body {
-              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+              background: #f8fafc;
+              color: #1e293b;
               display: flex;
+              flex-direction: column;
+              align-items: center;
               justify-content: center;
+              min-height: 90vh;
               padding: 24px;
-              background-color: #f7f9f6;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
             }
-            .badge {
-              width: 380px;
-              border: 2px solid #2e7d32;
-              border-radius: 14px;
-              padding: 24px;
-              text-align: center;
-              background-color: #ffffff;
-              box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            @media print {
+              body {
+                background: #ffffff;
+                padding: 0;
+                min-height: 0;
+                display: block;
+              }
             }
-            .header {
-              font-size: 18px;
-              font-weight: 800;
-              letter-spacing: 0.5px;
-              color: #1b5e20;
-              margin-bottom: 2px;
-            }
-            .sub {
-              font-size: 11px;
-              color: #558b2f;
-              font-weight: 600;
-              text-transform: uppercase;
-              letter-spacing: 1px;
-              margin-bottom: 14px;
-            }
-            .qr-container {
-              margin: 12px auto;
-              padding: 10px;
-              background: #f1f8e9;
-              display: inline-block;
-              border-radius: 10px;
-            }
-            .qr-container img {
-              width: 150px;
-              height: 150px;
-              display: block;
-            }
-            .photo-container {
-              margin: 12px 0;
-            }
-            .photo-container img {
-              width: 100%;
-              max-height: 180px;
-              object-fit: cover;
+            .tag-card {
+              width: 300px;
+              border: 2px dashed #64748b;
               border-radius: 8px;
-              border: 1px solid #c8e6c9;
+              padding: 18px 16px;
+              background: #ffffff;
+              display: flex;
+              flex-direction: column;
+              justify-content: center;
+              align-items: center;
+              text-align: center;
+              box-sizing: border-box;
+              margin: 20px auto;
+              box-shadow: 0 4px 14px rgba(0,0,0,0.06);
             }
-            .tree-id {
-              font-size: 16px;
-              font-weight: bold;
-              color: #2e7d32;
-              margin: 8px 0 14px 0;
-              background: #e8f5e9;
-              padding: 6px 12px;
-              border-radius: 6px;
-              display: inline-block;
+            @media print {
+              .tag-card {
+                box-shadow: none;
+                margin: 10mm auto;
+              }
             }
-            table {
+            .tag-header-strip {
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
               width: 100%;
-              border-collapse: collapse;
-              margin-top: 10px;
-              text-align: left;
-              font-size: 12px;
-            }
-            th {
-              color: #555;
-              padding: 6px 4px;
-              border-bottom: 1px solid #e0e0e0;
-              width: 42%;
-              font-weight: 600;
-            }
-            td {
-              color: #111;
-              padding: 6px 4px;
-              border-bottom: 1px solid #e0e0e0;
-              font-weight: 500;
-            }
-            .status-tag {
-              display: inline-block;
-              padding: 2px 8px;
-              border-radius: 10px;
-              font-size: 11px;
-              font-weight: bold;
-              background: #e8f5e9;
-              color: #2e7d32;
-            }
-            .footer {
-              margin-top: 16px;
               font-size: 10px;
-              color: #888;
+              color: #15803d;
+              padding-bottom: 6px;
+              margin-bottom: 12px;
+              border-bottom: 1px solid #e2e8f0;
+            }
+            .tag-badge {
+              font-size: 9px;
+              font-weight: 700;
+              background: #ecfdf5;
+              color: #047857;
+              padding: 2px 6px;
+              border-radius: 4px;
+              border: 1px solid #a7f3d0;
+            }
+            .tag-qr-wrap {
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              padding: 6px;
+              background: #ffffff;
+              margin-bottom: 8px;
+            }
+            .tag-qr-img {
+              display: block;
+              width: 190px;
+              height: 190px;
+              margin: 0 auto;
+              image-rendering: -webkit-optimize-contrast;
+              image-rendering: crisp-edges;
+              image-rendering: pixelated;
+            }
+            .tag-id-small {
+              font-family: monospace, monospace;
+              color: #334155;
+              font-size: 13px;
+              font-weight: 700;
+              letter-spacing: 0.5px;
+              margin-top: 4px;
+              line-height: 1.2;
+              white-space: nowrap;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              max-width: 96%;
+            }
+            .tag-species-name {
+              font-weight: 700;
+              color: #15803d;
+              font-size: 16px;
+              margin-top: 3px;
+              line-height: 1.25;
+              max-width: 96%;
+              word-break: break-word;
+            }
+            .tag-cut-guideline {
+              margin-top: 14px;
+              padding-top: 8px;
+              border-top: 1px dashed #cbd5e1;
+              font-size: 9.5px;
+              color: #64748b;
+              letter-spacing: 0.3px;
             }
           </style>
         </head>
         <body>
-          <div class="badge">
-            <div class="header">🌿 JAGORI FOUNDATION</div>
-            <div class="sub">Tree Conservation & Tagging Slip</div>
-
-            <div class="qr-container">
-              <img src="${qrImageSvg}" alt="Tree QR Code" />
+          <div class="tag-card">
+            <div class="tag-header-strip">
+              <span>🌿 <strong>JAGORI FOUNDATION</strong></span>
+              <span class="tag-badge">${qrCodeType === 'OFFLINE' ? '📴 OFFLINE TAG' : '🌐 WEB TAG'}</span>
             </div>
-
-            <div style="font-size: 12px; font-family: monospace, monospace; color: #475569; font-weight: 600; margin-top: 6px; letter-spacing: 0.5px;">
-              ${escapeHtml(treeToExport.treeId)}
+            <div class="tag-qr-wrap">
+              <img class="tag-qr-img" src="${qrImageUrl}" width="190" height="190" alt="Tree QR Code" />
             </div>
-            <div style="font-size: 16px; font-weight: 700; color: #15803d; margin-top: 2px; margin-bottom: 12px;">
-              ${escapeHtml(treeToExport.species || 'Specimen')}
-            </div>
-
-            ${
-              treeToExport.treePhotoBase64
-                ? `<div class="photo-container"><img src="${treeToExport.treePhotoBase64}" alt="Tree Photograph" /></div>`
-                : ''
-            }
-
-            <table>
-              <tr>
-                <th>1. Tree ID</th>
-                <td>${treeToExport.treeId}</td>
-              </tr>
-              <tr>
-                <th>2. Species</th>
-                <td>${treeToExport.species}</td>
-              </tr>
-              <tr>
-                <th>3. Plantation Date</th>
-                <td>${treeToExport.plantationDate}</td>
-              </tr>
-              <tr>
-                <th>4. GPS Location</th>
-                <td>${treeToExport.lat}, ${treeToExport.lng}</td>
-              </tr>
-              <tr>
-                <th>5. Donor Name</th>
-                <td>${treeToExport.donorName}</td>
-              </tr>
-              <tr>
-                <th>6. Village</th>
-                <td>${treeToExport.village}</td>
-              </tr>
-              <tr>
-                <th>7. Tree Photo</th>
-                <td>${treeToExport.treePhoto ? 'Captured' : 'No Photo'}</td>
-              </tr>
-              <tr>
-                <th>8. Height</th>
-                <td>${treeToExport.height}</td>
-              </tr>
-              <tr>
-                <th>9. Girth</th>
-                <td>${treeToExport.girth}</td>
-              </tr>
-              <tr>
-                <th>10. Last Inspection</th>
-                <td>${treeToExport.lastInspection}</td>
-              </tr>
-              <tr>
-                <th>11. Survival Status</th>
-                <td><span class="status-tag">${treeToExport.survivalStatus}</span></td>
-              </tr>
-            </table>
-
-            <div class="footer">
-              Scan QR code on tree to view live verification profile: ${treeToExport.url}
-            </div>
+            <div class="tag-id-small">${escapeHtml(treeToExport.treeId)}</div>
+            <div class="tag-species-name">${escapeHtml(treeToExport.species || 'Specimen')}</div>
+            <div class="tag-cut-guideline">✂️ Cut along dashed lines • Laminate for field stake</div>
           </div>
         </body>
       </html>
@@ -1558,7 +1563,7 @@ export default function App() {
                   ? (tree.qrText || buildTreeQrText(tree))
                   : (tree.url || buildPublicTreeUrl(tree.treeId));
 
-              const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${qrSize * 2}x${qrSize * 2}&data=${encodeURIComponent(
+              const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&ecc=M&margin=1&data=${encodeURIComponent(
                 qrData
               )}`;
 
@@ -1666,6 +1671,9 @@ export default function App() {
             .tag-qr-img {
               display: block;
               margin: 0 auto;
+              image-rendering: -webkit-optimize-contrast;
+              image-rendering: crisp-edges;
+              image-rendering: pixelated;
             }
             .tag-id-small {
               font-family: monospace, monospace;
@@ -2864,12 +2872,21 @@ export default function App() {
                 </View>
               </View>
 
-              <TouchableOpacity
-                style={styles.pdfBtn}
-                onPress={() => handleExportPDF(savedTree)}
-              >
-                <Text style={styles.btnText}>🖨️ Export Printable QR Slip (PDF)</Text>
-              </TouchableOpacity>
+              <View style={styles.qrActionBtnRow}>
+                <TouchableOpacity
+                  style={[styles.pdfBtn, { flex: 1.1, marginRight: 6 }]}
+                  onPress={() => handleExportPDF(savedTree)}
+                >
+                  <Text style={styles.btnText}>🖨️ Export QR Tag (PDF)</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.pdfBtn, { flex: 0.9, marginLeft: 6, backgroundColor: '#0284c7' }]}
+                  onPress={() => handleDownloadQrImage(savedTree)}
+                >
+                  <Text style={styles.btnText}>💾 Save QR Image</Text>
+                </TouchableOpacity>
+              </View>
 
               <TouchableOpacity
                 style={styles.batchPrintTodayBtn}
@@ -3080,6 +3097,22 @@ export default function App() {
                 <Text style={styles.qrSyncNoticeText}>
                   Editing this tree updates the original record directly. The physical QR tag attached to this tree remains permanent — anyone scanning it will automatically see these updated records. No new QR code needed.
                 </Text>
+              </View>
+
+              {/* Quick QR Export & Download for Field Replacement */}
+              <View style={styles.updateTreeQrActions}>
+                <TouchableOpacity
+                  style={styles.updateTagBtn}
+                  onPress={() => handleExportPDF(selectedTree)}
+                >
+                  <Text style={styles.updateTagBtnText}>🖨️ Export QR Tag (PDF)</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.updateTagBtn, { backgroundColor: '#0284c7', borderColor: '#0369a1' }]}
+                  onPress={() => handleDownloadQrImage(selectedTree)}
+                >
+                  <Text style={styles.updateTagBtnText}>💾 Save QR Image</Text>
+                </TouchableOpacity>
               </View>
 
               {/* Public Preview Button for Admin */}
@@ -4818,8 +4851,14 @@ const styles = StyleSheet.create({
     padding: 14,
     backgroundColor: '#fafffa',
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#c8e6c9',
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: '#94a3b8',
+  },
+  qrActionBtnRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 4,
   },
   qrToggleRow: {
     flexDirection: 'row',
@@ -4903,6 +4942,27 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontWeight: '700',
     fontSize: 12,
+  },
+  updateTreeQrActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 6,
+  },
+  updateTagBtn: {
+    flex: 1,
+    backgroundColor: '#1b5e20',
+    paddingVertical: 9,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#166534',
+    marginHorizontal: 3,
+  },
+  updateTagBtnText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
   },
   previewPublicBtnSmall: {
     backgroundColor: '#e8f5e9',
