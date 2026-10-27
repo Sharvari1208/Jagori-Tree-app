@@ -321,6 +321,22 @@ export default function App() {
   const [isBatchPrinting, setIsBatchPrinting] = useState(false);
   const [sheetProgressMessage, setSheetProgressMessage] = useState('');
 
+  // Universal In-Progress Loading State for All Buffering Actions
+  const [globalProgress, setGlobalProgress] = useState({
+    visible: false,
+    title: '',
+    message: '',
+    badge: '⏳ Please wait a moment',
+  });
+
+  const showProgress = (title, message, badge = '⏳ Please wait a moment') => {
+    setGlobalProgress({ visible: true, title, message, badge });
+  };
+
+  const hideProgress = () => {
+    setGlobalProgress((prev) => ({ ...prev, visible: false }));
+  };
+
   // ==========================================
   // ADD TREE FORM STATE (11 categories in sequence)
   // ==========================================
@@ -483,15 +499,24 @@ export default function App() {
   }, [initialScannedTreeId, trees, todayStr]);
 
   // Sync offline queue with Supabase Cloud
-  const syncPendingTreesWithCloud = async () => {
+  const syncPendingTreesWithCloud = async (isManual = false) => {
     if (!isSupabaseConfigured || !supabase || isSyncing) return;
     try {
+      if (isManual) {
+        showProgress(
+          'Syncing with Cloud Database...',
+          'Uploading offline queued tree records to Supabase cloud...',
+          '☁️ Cloud Sync'
+        );
+        await new Promise((resolve) => setTimeout(resolve, 80));
+      }
       setIsSyncing(true);
       setCloudSyncStatus('SYNCING');
       const queue = await getPendingSyncQueue();
       if (queue.length === 0) {
         setCloudSyncStatus('SYNCED');
         setIsSyncing(false);
+        if (isManual) hideProgress();
         return;
       }
 
@@ -534,6 +559,7 @@ export default function App() {
       setCloudSyncStatus('OFFLINE');
     } finally {
       setIsSyncing(false);
+      if (isManual) hideProgress();
     }
   };
 
@@ -546,6 +572,13 @@ export default function App() {
     }
 
     try {
+      showProgress(
+        'Exporting Excel Spreadsheet...',
+        `Compiling ${trees.length} tree records into an Excel (.xlsx) workbook...`,
+        '📊 Excel Export'
+      );
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
       // 1. Prepare structured data array with standard Excel columns
       const excelData = trees.map((t, idx) => ({
         'S.No': idx + 1,
@@ -635,6 +668,8 @@ export default function App() {
     } catch (err) {
       console.warn('Excel export error:', err);
       Alert.alert('Export Error', `Could not export Excel: ${err.message || err}`);
+    } finally {
+      hideProgress();
     }
   };
 
@@ -738,13 +773,19 @@ export default function App() {
   const fetchLocation = async () => {
     try {
       setIsLocating(true);
+      showProgress(
+        'Acquiring GPS Coordinates...',
+        'Connecting to satellite sensors for high-precision field latitude and longitude...',
+        '📍 GPS Active'
+      );
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert(
           'Permission Denied',
           'GPS permission was denied. You can manually enter Latitude and Longitude in the columns below.'
         );
-        setIsLocating(false);
         return;
       }
 
@@ -761,6 +802,7 @@ export default function App() {
       );
     } finally {
       setIsLocating(false);
+      hideProgress();
     }
   };
 
@@ -883,61 +925,70 @@ export default function App() {
 
     const newTree = treeData;
 
-    setIsSaving(true);
-
-    // 1. Immediately persist locally (Guarantees zero data loss)
-    const updatedList = [newTree, ...trees.filter((t) => t.treeId !== trimmedId)];
-    setTrees(updatedList);
-    await saveTreesToStorage(updatedList);
-    setSavedTree(newTree);
-
-    // 2. Sync to Supabase Cloud
-    let isCloudSuccess = false;
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const { error } = await supabase.from('trees').upsert(
-          [
-            {
-              tree_id: newTree.treeId,
-              species: newTree.species,
-              plantation_date: newTree.plantationDate,
-              latitude: newTree.lat,
-              longitude: newTree.lng,
-              donor_name: newTree.donorName,
-              village: newTree.village,
-              tree_photo_url: newTree.treePhotoBase64 || newTree.treePhoto,
-              height: newTree.height,
-              girth: newTree.girth,
-              last_inspection: newTree.lastInspection,
-              survival_status: newTree.survivalStatus,
-              public_url: newTree.url,
-            },
-          ],
-          { onConflict: 'tree_id' }
-        );
-
-        if (!error) {
-          isCloudSuccess = true;
-          setCloudSyncStatus('SYNCED');
-        } else {
-          console.warn('Supabase sync warning:', error.message);
-        }
-      } catch (err) {
-        console.warn('Supabase save error:', err);
-      }
-    }
-
-    if (!isCloudSuccess) {
-      const remainingCount = await addToSyncQueue(newTree);
-      setPendingSyncCount(remainingCount);
-      setCloudSyncStatus('PENDING');
-      Alert.alert(
-        'Saved to Device (Offline Mode)',
-        `Tree ${trimmedId} has been securely saved to this device!\n\n📶 You are currently offline. This record is queued and will automatically sync to the database once connected.`
+    try {
+      setIsSaving(true);
+      showProgress(
+        'Registering Tree Record...',
+        `Saving Tree ${trimmedId}, storing field data, and generating permanent verification QR code...`,
+        '🌱 Registering'
       );
-    }
+      await new Promise((resolve) => setTimeout(resolve, 80));
 
-    setIsSaving(false);
+      // 1. Immediately persist locally (Guarantees zero data loss)
+      const updatedList = [newTree, ...trees.filter((t) => t.treeId !== trimmedId)];
+      setTrees(updatedList);
+      await saveTreesToStorage(updatedList);
+      setSavedTree(newTree);
+
+      // 2. Sync to Supabase Cloud
+      let isCloudSuccess = false;
+      if (isSupabaseConfigured && supabase) {
+        try {
+          const { error } = await supabase.from('trees').upsert(
+            [
+              {
+                tree_id: newTree.treeId,
+                species: newTree.species,
+                plantation_date: newTree.plantationDate,
+                latitude: newTree.lat,
+                longitude: newTree.lng,
+                donor_name: newTree.donorName,
+                village: newTree.village,
+                tree_photo_url: newTree.treePhotoBase64 || newTree.treePhoto,
+                height: newTree.height,
+                girth: newTree.girth,
+                last_inspection: newTree.lastInspection,
+                survival_status: newTree.survivalStatus,
+                public_url: newTree.url,
+              },
+            ],
+            { onConflict: 'tree_id' }
+          );
+
+          if (!error) {
+            isCloudSuccess = true;
+            setCloudSyncStatus('SYNCED');
+          } else {
+            console.warn('Supabase sync warning:', error.message);
+          }
+        } catch (err) {
+          console.warn('Supabase save error:', err);
+        }
+      }
+
+      if (!isCloudSuccess) {
+        const remainingCount = await addToSyncQueue(newTree);
+        setPendingSyncCount(remainingCount);
+        setCloudSyncStatus('PENDING');
+        Alert.alert(
+          'Saved to Device (Offline Mode)',
+          `Tree ${trimmedId} has been securely saved to this device!\n\n📶 You are currently offline. This record is queued and will automatically sync to the database once connected.`
+        );
+      }
+    } finally {
+      setIsSaving(false);
+      hideProgress();
+    }
   };
 
   // Reset Add Tree Form
@@ -979,84 +1030,92 @@ export default function App() {
       return;
     }
 
-    const qLower = query.toLowerCase();
-
-    // 1. Try local cache across all categories:
-    // Check exact Tree ID first
-    let foundLocal = trees.find((t) => t.treeId.toLowerCase() === qLower);
-
-    // If not found by exact ID, search across all categories (species, village, donor, date, status, etc.)
-    if (!foundLocal) {
-      foundLocal = trees.find(
-        (t) =>
-          (t.treeId && t.treeId.toLowerCase().includes(qLower)) ||
-          (t.species && t.species.toLowerCase().includes(qLower)) ||
-          (t.village && t.village.toLowerCase().includes(qLower)) ||
-          (t.donorName && t.donorName.toLowerCase().includes(qLower)) ||
-          (t.plantationDate && t.plantationDate.toLowerCase().includes(qLower)) ||
-          (t.survivalStatus && t.survivalStatus.toLowerCase().includes(qLower)) ||
-          (t.height && t.height.toLowerCase().includes(qLower)) ||
-          (t.girth && t.girth.toLowerCase().includes(qLower)) ||
-          (t.lastInspection && t.lastInspection.toLowerCase().includes(qLower))
+    try {
+      showProgress(
+        'Searching Tree Registry...',
+        `Searching all categories for "${query}" across local & cloud records...`,
+        '🔍 Searching'
       );
-    }
+      await new Promise((resolve) => setTimeout(resolve, 80));
 
-    if (foundLocal) {
-      applySelectedTree(foundLocal);
-      return;
-    }
+      const qLower = query.toLowerCase();
 
-    // 2. Query Supabase across all categories if connected
-    if (isSupabaseConfigured && supabase) {
-      setIsSearching(true);
-      try {
-        const { data, error } = await supabase
-          .from('trees')
-          .select('*')
-          .or(`tree_id.ilike.%${query}%,species.ilike.%${query}%,village.ilike.%${query}%,donor_name.ilike.%${query}%,survival_status.ilike.%${query}%,plantation_date.ilike.%${query}%`)
-          .limit(1);
+      // 1. Try local cache across all categories:
+      // Check exact Tree ID first
+      let foundLocal = trees.find((t) => t.treeId.toLowerCase() === qLower);
 
-        if (data && data.length > 0 && !error) {
-          const row = data[0];
-          const loadedTree = {
-            treeId: row.tree_id,
-            species: row.species,
-            plantationDate: row.plantation_date,
-            lat: row.latitude,
-            lng: row.longitude,
-            donorName: row.donor_name || 'Jagori Community',
-            village: row.village || 'General Habitat',
-            treePhoto: row.tree_photo_url,
-            treePhotoBase64: row.tree_photo_url,
-            height: row.height || 'Not Measured',
-            girth: row.girth || 'Not Measured',
-            lastInspection: row.last_inspection || todayStr,
-            survivalStatus: row.survival_status || 'Healthy',
-            url: row.public_url || buildPublicTreeUrl(row.tree_id),
-          };
-          setTrees((prev) => [loadedTree, ...prev.filter((t) => t.treeId !== loadedTree.treeId)]);
-          applySelectedTree(loadedTree);
-          setIsSearching(false);
-          return;
-        }
-      } catch (err) {
-        console.warn('Supabase lookup error:', err);
-      } finally {
-        setIsSearching(false);
+      // If not found by exact ID, search across all categories (species, village, donor, date, status, etc.)
+      if (!foundLocal) {
+        foundLocal = trees.find(
+          (t) =>
+            (t.treeId && t.treeId.toLowerCase().includes(qLower)) ||
+            (t.species && t.species.toLowerCase().includes(qLower)) ||
+            (t.village && t.village.toLowerCase().includes(qLower)) ||
+            (t.donorName && t.donorName.toLowerCase().includes(qLower)) ||
+            (t.plantationDate && t.plantationDate.toLowerCase().includes(qLower)) ||
+            (t.survivalStatus && t.survivalStatus.toLowerCase().includes(qLower)) ||
+            (t.height && t.height.toLowerCase().includes(qLower)) ||
+            (t.girth && t.girth.toLowerCase().includes(qLower)) ||
+            (t.lastInspection && t.lastInspection.toLowerCase().includes(qLower))
+        );
       }
-    }
 
-    Alert.alert(
-      'Not Found',
-      `No tree record found matching "${query}".\n\nTry searching by species, village, donor name, date, or Tree ID.`
-    );
+      if (foundLocal) {
+        applySelectedTree(foundLocal);
+        return;
+      }
+
+      // 2. Query Supabase across all categories if connected
+      if (isSupabaseConfigured && supabase) {
+        setIsSearching(true);
+        try {
+          const { data, error } = await supabase
+            .from('trees')
+            .select('*')
+            .or(`tree_id.ilike.%${query}%,species.ilike.%${query}%,village.ilike.%${query}%,donor_name.ilike.%${query}%,survival_status.ilike.%${query}%,plantation_date.ilike.%${query}%`)
+            .limit(1);
+
+          if (data && data.length > 0 && !error) {
+            const row = data[0];
+            const loadedTree = {
+              treeId: row.tree_id,
+              species: row.species,
+              plantationDate: row.plantation_date,
+              lat: row.latitude,
+              lng: row.longitude,
+              donorName: row.donor_name || 'Jagori Community',
+              village: row.village || 'General Habitat',
+              treePhoto: row.tree_photo_url,
+              treePhotoBase64: row.tree_photo_url,
+              height: row.height || 'Not Measured',
+              girth: row.girth || 'Not Measured',
+              lastInspection: row.last_inspection || todayStr,
+              survivalStatus: row.survival_status || 'Healthy',
+              url: row.public_url || buildPublicTreeUrl(row.tree_id),
+            };
+            setTrees((prev) => [loadedTree, ...prev.filter((t) => t.treeId !== loadedTree.treeId)]);
+            applySelectedTree(loadedTree);
+            return;
+          }
+        } catch (err) {
+          console.warn('Supabase lookup error:', err);
+        } finally {
+          setIsSearching(false);
+        }
+      }
+
+      Alert.alert(
+        'Not Found',
+        `No tree record found matching "${query}".\n\nTry searching by species, village, donor name, date, or Tree ID.`
+      );
+    } finally {
+      hideProgress();
+    }
   };
 
   // Save Updates to Tree (Supabase & Local)
   const handleSaveTreeUpdate = async () => {
     if (!selectedTree) return;
-
-    setIsUpdating(true);
 
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (updateLastInspection.trim() && !dateRegex.test(updateLastInspection.trim())) {
@@ -1064,75 +1123,86 @@ export default function App() {
       return;
     }
 
-    const updatedTree = {
-      ...selectedTree,
-      species: updateSpecies.trim() || selectedTree.species,
-      donorName: updateDonorName.trim() || selectedTree.donorName,
-      village: updateVillage.trim() || selectedTree.village,
-      height: updateHeight.trim() || selectedTree.height,
-      girth: updateGirth.trim() || selectedTree.girth,
-      lastInspection: updateLastInspection.trim() || todayStr,
-      survivalStatus: updateSurvivalStatus,
-      treePhoto: updatePhoto,
-      treePhotoBase64: updatePhotoBase64,
-      url: selectedTree.url || buildPublicTreeUrl(selectedTree.treeId),
-    };
-    updatedTree.qrText = buildTreeQrText(updatedTree);
+    try {
+      setIsUpdating(true);
+      showProgress(
+        'Saving Tree Updates...',
+        `Updating growth measurements and survival status for Tree ${selectedTree.treeId}...`,
+        '💾 Updating'
+      );
+      await new Promise((resolve) => setTimeout(resolve, 80));
 
-    // 1. Immediately persist locally
-    const updatedList = trees.map((t) => (t.treeId === updatedTree.treeId ? updatedTree : t));
-    setTrees(updatedList);
-    await saveTreesToStorage(updatedList);
-    setSelectedTree(updatedTree);
-    setPublicTree(updatedTree);
+      const updatedTree = {
+        ...selectedTree,
+        species: updateSpecies.trim() || selectedTree.species,
+        donorName: updateDonorName.trim() || selectedTree.donorName,
+        village: updateVillage.trim() || selectedTree.village,
+        height: updateHeight.trim() || selectedTree.height,
+        girth: updateGirth.trim() || selectedTree.girth,
+        lastInspection: updateLastInspection.trim() || todayStr,
+        survivalStatus: updateSurvivalStatus,
+        treePhoto: updatePhoto,
+        treePhotoBase64: updatePhotoBase64,
+        url: selectedTree.url || buildPublicTreeUrl(selectedTree.treeId),
+      };
+      updatedTree.qrText = buildTreeQrText(updatedTree);
 
-    // 2. Update in Supabase Cloud
-    let isCloudSuccess = false;
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const { error } = await supabase
-          .from('trees')
-          .update({
-            species: updatedTree.species,
-            donor_name: updatedTree.donorName,
-            village: updatedTree.village,
-            tree_photo_url: updatedTree.treePhotoBase64 || updatedTree.treePhoto,
-            height: updatedTree.height,
-            girth: updatedTree.girth,
-            last_inspection: updatedTree.lastInspection,
-            survival_status: updatedTree.survivalStatus,
-            public_url: updatedTree.url,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('tree_id', updatedTree.treeId);
+      // 1. Immediately persist locally
+      const updatedList = trees.map((t) => (t.treeId === updatedTree.treeId ? updatedTree : t));
+      setTrees(updatedList);
+      await saveTreesToStorage(updatedList);
+      setSelectedTree(updatedTree);
+      setPublicTree(updatedTree);
 
-        if (!error) {
-          isCloudSuccess = true;
-          setCloudSyncStatus('SYNCED');
-        } else {
-          console.warn('Supabase update warning:', error.message);
+      // 2. Update in Supabase Cloud
+      let isCloudSuccess = false;
+      if (isSupabaseConfigured && supabase) {
+        try {
+          const { error } = await supabase
+            .from('trees')
+            .update({
+              species: updatedTree.species,
+              donor_name: updatedTree.donorName,
+              village: updatedTree.village,
+              tree_photo_url: updatedTree.treePhotoBase64 || updatedTree.treePhoto,
+              height: updatedTree.height,
+              girth: updatedTree.girth,
+              last_inspection: updatedTree.lastInspection,
+              survival_status: updatedTree.survivalStatus,
+              public_url: updatedTree.url,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('tree_id', updatedTree.treeId);
+
+          if (!error) {
+            isCloudSuccess = true;
+            setCloudSyncStatus('SYNCED');
+          } else {
+            console.warn('Supabase update warning:', error.message);
+          }
+        } catch (err) {
+          console.warn('Supabase update error:', err);
         }
-      } catch (err) {
-        console.warn('Supabase update error:', err);
       }
-    }
 
-    if (!isCloudSuccess) {
-      const remainingCount = await addToSyncQueue(updatedTree);
-      setPendingSyncCount(remainingCount);
-      setCloudSyncStatus('PENDING');
-      Alert.alert(
-        'Updated Locally (Offline Mode)',
-        `Tree ${updatedTree.treeId} updates have been saved to this device!\n\n📶 These changes will sync to the database as soon as you have internet.`
-      );
-    } else {
-      Alert.alert(
-        'Tree Updated',
-        `Tree ${updatedTree.treeId} information has been successfully updated in the database!\n\n✓ The existing physical QR code on this tree remains active and will now show these latest records.`
-      );
+      if (!isCloudSuccess) {
+        const remainingCount = await addToSyncQueue(updatedTree);
+        setPendingSyncCount(remainingCount);
+        setCloudSyncStatus('PENDING');
+        Alert.alert(
+          'Updated Locally (Offline Mode)',
+          `Tree ${updatedTree.treeId} updates have been saved to this device!\n\n📶 These changes will sync to the database as soon as you have internet.`
+        );
+      } else {
+        Alert.alert(
+          'Tree Updated',
+          `Tree ${updatedTree.treeId} information has been successfully updated in the database!\n\n✓ The existing physical QR code on this tree remains active and will now show these latest records.`
+        );
+      }
+    } finally {
+      setIsUpdating(false);
+      hideProgress();
     }
-
-    setIsUpdating(false);
   };
 
   // Delete Tree Record (with strict confirmation)
@@ -1147,21 +1217,32 @@ export default function App() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            const updated = trees.filter((t) => t.treeId !== idToDelete);
-            setTrees(updated);
-            await saveTreesToStorage(updated);
-            setSelectedTree(null);
-            setSearchTreeId('');
+            try {
+              showProgress(
+                'Deleting Tree Record...',
+                `Permanently removing Tree ${idToDelete} from device and cloud database...`,
+                '🗑️ Deleting'
+              );
+              await new Promise((resolve) => setTimeout(resolve, 80));
 
-            if (isSupabaseConfigured && supabase) {
-              try {
-                await supabase.from('trees').delete().eq('tree_id', idToDelete);
-              } catch (err) {
-                console.warn('Supabase delete error:', err);
+              const updated = trees.filter((t) => t.treeId !== idToDelete);
+              setTrees(updated);
+              await saveTreesToStorage(updated);
+              setSelectedTree(null);
+              setSearchTreeId('');
+
+              if (isSupabaseConfigured && supabase) {
+                try {
+                  await supabase.from('trees').delete().eq('tree_id', idToDelete);
+                } catch (err) {
+                  console.warn('Supabase delete error:', err);
+                }
               }
-            }
 
-            Alert.alert('Tree Deleted', `Tree ${idToDelete} has been permanently deleted.`);
+              Alert.alert('Tree Deleted', `Tree ${idToDelete} has been permanently deleted.`);
+            } finally {
+              hideProgress();
+            }
           },
         },
       ]
@@ -1183,28 +1264,35 @@ export default function App() {
   // Download or Share High-Resolution QR Code Image Directly (PNG)
   const handleDownloadQrImage = async (tree) => {
     if (!tree) return;
-    const qrData = tree.url || buildPublicTreeUrl(tree.treeId);
-    // 1000x1000 px source image with zero margin so the QR code fills the image completely
-    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&ecc=M&margin=0&data=${encodeURIComponent(
-      qrData
-    )}`;
-
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      try {
-        const link = document.createElement('a');
-        link.href = qrImageUrl;
-        link.download = `QR_${tree.treeId}.png`;
-        link.target = '_blank';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      } catch {
-        window.open(qrImageUrl, '_blank');
-      }
-      return;
-    }
-
     try {
+      showProgress(
+        'Saving QR Code Image...',
+        `Downloading high-resolution crystal-clear PNG image for Tree ${tree.treeId}...`,
+        '📷 PNG Download'
+      );
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      const qrData = tree.url || buildPublicTreeUrl(tree.treeId);
+      // 1000x1000 px source image with zero margin so the QR code fills the image completely
+      const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&ecc=M&margin=0&data=${encodeURIComponent(
+        qrData
+      )}`;
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        try {
+          const link = document.createElement('a');
+          link.href = qrImageUrl;
+          link.download = `QR_${tree.treeId}.png`;
+          link.target = '_blank';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        } catch {
+          window.open(qrImageUrl, '_blank');
+        }
+        return;
+      }
+
       const filename = `QR_${tree.treeId.replace(/[^a-zA-Z0-9_-]/g, '_')}.png`;
       const localUri = `${FileSystem.cacheDirectory}${filename}`;
       const downloadRes = await FileSystem.downloadAsync(qrImageUrl, localUri);
@@ -1220,7 +1308,9 @@ export default function App() {
     } catch (err) {
       console.warn('Error downloading QR image:', err);
       Alert.alert('Download Error', 'Could not save QR image. Opening browser image instead.');
-      Linking.openURL(qrImageUrl);
+      Linking.openURL(tree.url || buildPublicTreeUrl(tree.treeId));
+    } finally {
+      hideProgress();
     }
   };
 
@@ -1229,6 +1319,11 @@ export default function App() {
     if (!treeToExport) return;
 
     try {
+      showProgress(
+        'Generating Printable QR Tag...',
+        `Preparing high-resolution printable QR tag for Tree ${treeToExport.treeId}...`,
+        '🏷️ Printable Tag'
+      );
       setSheetProgressMessage(`Generating printable QR tag for ${treeToExport.treeId}...`);
       setIsBatchPrinting(true);
       await new Promise((resolve) => setTimeout(resolve, 80));
@@ -1392,6 +1487,7 @@ export default function App() {
     } finally {
       setIsBatchPrinting(false);
       setSheetProgressMessage('');
+      hideProgress();
     }
   };
 
@@ -1524,6 +1620,11 @@ export default function App() {
     }
 
     try {
+      showProgress(
+        'Generating A4 QR Sheet in Progress...',
+        `Preparing ${treesToPrint.length} high-resolution QR tags for ${dateLabel} (${density} tags per page)...`,
+        '🖨️ A4 Printing'
+      );
       setSheetProgressMessage(
         `Preparing ${treesToPrint.length} high-resolution QR tags for ${dateLabel} (${density} tags per page)...`
       );
@@ -1732,6 +1833,11 @@ export default function App() {
       </html>
     `;
 
+      showProgress(
+        'Formatting Printable Sheet...',
+        `Formatting ${totalPages} A4 printable ${totalPages === 1 ? 'sheet' : 'sheets'} with ${treesToPrint.length} tags. Opening document...`,
+        '🖨️ A4 Printing'
+      );
       setSheetProgressMessage(
         `Formatting ${totalPages} A4 printable ${totalPages === 1 ? 'sheet' : 'sheets'} with ${treesToPrint.length} tags. Opening document...`
       );
@@ -1748,6 +1854,7 @@ export default function App() {
     } finally {
       setIsBatchPrinting(false);
       setSheetProgressMessage('');
+      hideProgress();
     }
   };
 
@@ -3614,10 +3721,10 @@ export default function App() {
       </Modal>
 
       {/* ============================================================== */}
-      {/* QR SHEET GENERATION IN PROGRESS MODAL OVERLAY */}
+      {/* UNIVERSAL IN-PROGRESS / BUFFERING MODAL OVERLAY */}
       {/* ============================================================== */}
       <Modal
-        visible={isBatchPrinting}
+        visible={globalProgress.visible || isBatchPrinting}
         transparent={true}
         animationType="fade"
         statusBarTranslucent={true}
@@ -3627,12 +3734,18 @@ export default function App() {
             <View style={styles.sheetProgressSpinnerWrap}>
               <ActivityIndicator size="large" color="#15803d" />
             </View>
-            <Text style={styles.sheetProgressTitle}>Generating QR Sheet in Progress...</Text>
+            <Text style={styles.sheetProgressTitle}>
+              {globalProgress.title || 'Generating QR Sheet in Progress...'}
+            </Text>
             <Text style={styles.sheetProgressMessage}>
-              {sheetProgressMessage || 'Preparing high-resolution A4 QR tag sheets for printing and export.'}
+              {globalProgress.message ||
+                sheetProgressMessage ||
+                'Preparing high-resolution documents for export.'}
             </Text>
             <View style={styles.sheetProgressPill}>
-              <Text style={styles.sheetProgressPillText}>⏳ Please wait a moment</Text>
+              <Text style={styles.sheetProgressPillText}>
+                {globalProgress.badge || '⏳ Please wait a moment'}
+              </Text>
             </View>
           </View>
         </View>
