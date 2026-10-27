@@ -1447,13 +1447,16 @@ export default function App() {
 
     // 2. MOBILE PLATFORM: Expo Go (Android & iOS)
     try {
-      const { uri } = await Print.printToFileAsync({ html: htmlContent });
-      const safeFilename = `${filenamePrefix || 'jagori_trees'}_${todayStr}_${Date.now()}.pdf`;
-      const targetUri = `${FileSystem.cacheDirectory}${safeFilename}`;
-      await FileSystem.copyAsync({ from: uri, to: targetUri });
+      if (Platform.OS === 'android') {
+        // On Android, Print.printAsync natively launches Android Print Spooler with "Save as PDF" & connected printers
+        await Print.printAsync({ html: htmlContent });
+        return;
+      }
 
+      // iOS and other mobile platforms: printToFileAsync + native share sheet
+      const { uri } = await Print.printToFileAsync({ html: htmlContent });
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(targetUri, {
+        await Sharing.shareAsync(uri, {
           mimeType: 'application/pdf',
           dialogTitle: documentTitle,
           UTI: 'com.adobe.pdf',
