@@ -319,6 +319,7 @@ export default function App() {
   const [batchSelectedDate, setBatchSelectedDate] = useState('ALL');
   const [batchTagDensity, setBatchTagDensity] = useState(16); // 16 (Compact Default), 12, 20, 24
   const [isBatchPrinting, setIsBatchPrinting] = useState(false);
+  const [sheetProgressMessage, setSheetProgressMessage] = useState('');
 
   // ==========================================
   // ADD TREE FORM STATE (11 categories in sequence)
@@ -1227,14 +1228,19 @@ export default function App() {
   const handleExportPDF = async (treeToExport) => {
     if (!treeToExport) return;
 
-    const qrData = treeToExport.url || buildPublicTreeUrl(treeToExport.treeId);
+    try {
+      setSheetProgressMessage(`Generating printable QR tag for ${treeToExport.treeId}...`);
+      setIsBatchPrinting(true);
+      await new Promise((resolve) => setTimeout(resolve, 80));
 
-    // High resolution 1000x1000 source image with Medium error correction & ZERO margin for maximum QR size & clarity
-    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&ecc=M&margin=0&data=${encodeURIComponent(
-      qrData
-    )}`;
+      const qrData = treeToExport.url || buildPublicTreeUrl(treeToExport.treeId);
 
-    const htmlContent = `
+      // High resolution 1000x1000 source image with Medium error correction & ZERO margin for maximum QR size & clarity
+      const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&ecc=M&margin=0&data=${encodeURIComponent(
+        qrData
+      )}`;
+
+      const htmlContent = `
       <!DOCTYPE html>
       <html>
         <head>
@@ -1375,11 +1381,18 @@ export default function App() {
       </html>
     `;
 
-    await executePrintOrShareDocument(
-      htmlContent,
-      `Jagori Tree Tag - ${treeToExport.treeId}`,
-      `tag_${treeToExport.treeId}`
-    );
+      await executePrintOrShareDocument(
+        htmlContent,
+        `Jagori Tree Tag - ${treeToExport.treeId}`,
+        `tag_${treeToExport.treeId}`
+      );
+    } catch (err) {
+      console.warn('Export PDF error:', err);
+      Alert.alert('Export Error', 'Unable to generate printable QR tag.');
+    } finally {
+      setIsBatchPrinting(false);
+      setSheetProgressMessage('');
+    }
   };
 
   // Helper to escape HTML characters
@@ -1511,7 +1524,11 @@ export default function App() {
     }
 
     try {
+      setSheetProgressMessage(
+        `Preparing ${treesToPrint.length} high-resolution QR tags for ${dateLabel} (${density} tags per page)...`
+      );
       setIsBatchPrinting(true);
+      await new Promise((resolve) => setTimeout(resolve, 80));
 
       const pageSize = Number(density) || 16;
       const totalPages = Math.ceil(treesToPrint.length / pageSize);
@@ -1715,6 +1732,11 @@ export default function App() {
       </html>
     `;
 
+      setSheetProgressMessage(
+        `Formatting ${totalPages} A4 printable ${totalPages === 1 ? 'sheet' : 'sheets'} with ${treesToPrint.length} tags. Opening document...`
+      );
+      await new Promise((resolve) => setTimeout(resolve, 60));
+
       await executePrintOrShareDocument(
         fullHtml,
         `Jagori Compact A4 QR Tags - ${dateLabel}`,
@@ -1725,6 +1747,7 @@ export default function App() {
       Alert.alert('Print Error', 'Unable to generate A4 printable sheet.');
     } finally {
       setIsBatchPrinting(false);
+      setSheetProgressMessage('');
     }
   };
 
@@ -3588,6 +3611,31 @@ export default function App() {
             </View>
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ============================================================== */}
+      {/* QR SHEET GENERATION IN PROGRESS MODAL OVERLAY */}
+      {/* ============================================================== */}
+      <Modal
+        visible={isBatchPrinting}
+        transparent={true}
+        animationType="fade"
+        statusBarTranslucent={true}
+      >
+        <View style={styles.sheetProgressOverlay}>
+          <View style={styles.sheetProgressCard}>
+            <View style={styles.sheetProgressSpinnerWrap}>
+              <ActivityIndicator size="large" color="#15803d" />
+            </View>
+            <Text style={styles.sheetProgressTitle}>Generating QR Sheet in Progress...</Text>
+            <Text style={styles.sheetProgressMessage}>
+              {sheetProgressMessage || 'Preparing high-resolution A4 QR tag sheets for printing and export.'}
+            </Text>
+            <View style={styles.sheetProgressPill}>
+              <Text style={styles.sheetProgressPillText}>⏳ Please wait a moment</Text>
+            </View>
+          </View>
+        </View>
       </Modal>
     </KeyboardAvoidingView>
   );
@@ -5691,5 +5739,66 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontWeight: '800',
     fontSize: 12,
+  },
+  sheetProgressOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+    zIndex: 999999,
+  },
+  sheetProgressCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 24,
+    width: '100%',
+    maxWidth: 360,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 10,
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+  },
+  sheetProgressSpinnerWrap: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#f0fdf4',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#86efac',
+  },
+  sheetProgressTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#15803d',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  sheetProgressMessage: {
+    fontSize: 13,
+    color: '#475569',
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 14,
+  },
+  sheetProgressPill: {
+    backgroundColor: '#f1f5f9',
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+  },
+  sheetProgressPillText: {
+    fontSize: 11,
+    color: '#475569',
+    fontWeight: '600',
   },
 });
