@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as ImagePicker from 'expo-image-picker';
@@ -600,29 +601,44 @@ export default function App() {
     const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
 
     if (Platform.OS === 'web' && typeof window !== 'undefined' && typeof document !== 'undefined') {
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.setAttribute('href', url);
-      link.setAttribute('download', `jagori_trees_registry_${todayStr}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      try {
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        link.setAttribute('download', `jagori_trees_registry_${todayStr}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        setTimeout(() => {
+          if (link.parentNode) document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+        }, 300);
+        Alert.alert('CSV Exported', `Downloaded jagori_trees_registry_${todayStr}.csv`);
+      } catch (webErr) {
+        console.warn('Web CSV export fallback:', webErr);
+        const encoded = encodeURI('data:text/csv;charset=utf-8,' + csvContent);
+        window.open(encoded, '_blank');
+      }
     } else {
       try {
-        const file = await Print.printToFileAsync({
-          html: `<html><body><pre>${csvContent}</pre></body></html>`,
+        const fileName = `jagori_trees_registry_${todayStr}.csv`;
+        const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
+        await FileSystem.writeAsStringAsync(fileUri, csvContent, {
+          encoding: FileSystem.EncodingType.UTF8,
         });
+
         if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(file.uri, {
+          await Sharing.shareAsync(fileUri, {
             mimeType: 'text/csv',
             dialogTitle: 'Export Jagori Trees Registry (CSV)',
             UTI: 'public.comma-separated-values-text',
           });
+        } else {
+          Alert.alert('Export Successful', `CSV file created at: ${fileUri}`);
         }
-      } catch (_err) {
-        Alert.alert('Export Notice', 'Could not open export sharing dialog on this device.');
+      } catch (err) {
+        console.warn('Mobile CSV export error:', err);
+        Alert.alert('Export Notice', `Could not export CSV: ${err.message || err}`);
       }
     }
   };
@@ -1337,24 +1353,11 @@ export default function App() {
       </html>
     `;
 
-    try {
-      if (Platform.OS === 'web') {
-        await Print.printAsync({ html: htmlContent });
-      } else {
-        try {
-          const { uri } = await Print.printToFileAsync({ html: htmlContent });
-          if (await Sharing.isAvailableAsync()) {
-            await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
-          } else {
-            await Print.printAsync({ html: htmlContent });
-          }
-        } catch (_fileErr) {
-          await Print.printAsync({ html: htmlContent });
-        }
-      }
-    } catch (_error) {
-      Alert.alert('Error', 'Unable to create or share printable tag.');
-    }
+    await executePrintOrShareDocument(
+      htmlContent,
+      `Jagori Tree Tag - ${treeToExport.treeId}`,
+      `tag_${treeToExport.treeId}`
+    );
   };
 
   // Helper to escape HTML characters
@@ -1366,6 +1369,109 @@ export default function App() {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  };
+
+  // Universal Document Print & Sharing Pipeline (Bulletproof on Web, Android & iOS)
+  const executePrintOrShareDocument = async (htmlContent, documentTitle, filenamePrefix) => {
+    // 1. WEB PLATFORM: Desktop Chrome, Safari, Edge, Mobile Web Browsers
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      try {
+        const webHtml = htmlContent.replace(
+          '<body>',
+          `<body>
+            <div id="jagori-web-print-header" class="no-print" style="position: sticky; top: 0; z-index: 999999; background: #15803d; color: white; padding: 12px 18px; margin: -8mm -8mm 16px -8mm; box-shadow: 0 4px 10px rgba(0,0,0,0.15); display: flex; justify-content: space-between; align-items: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+              <div>
+                <strong style="font-size: 15px;">🌿 ${escapeHtml(documentTitle)}</strong>
+                <div style="font-size: 11px; opacity: 0.9; margin-top: 2px;">A4 Format Ready • Click below to print or save as PDF</div>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <button onclick="window.print()" style="background: #ffffff; color: #15803d; border: none; font-weight: 800; font-size: 13px; padding: 8px 18px; border-radius: 6px; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+                  🖨️ Print / Save as PDF
+                </button>
+                <button onclick="window.close()" style="background: rgba(255,255,255,0.2); color: white; border: 1px solid rgba(255,255,255,0.4); font-weight: 600; font-size: 12px; padding: 8px 14px; border-radius: 6px; cursor: pointer;">
+                  Close ✕
+                </button>
+              </div>
+            </div>
+            <style>
+              @media print {
+                #jagori-web-print-header, .no-print {
+                  display: none !important;
+                }
+              }
+            </style>`
+        );
+
+        const blob = new Blob([webHtml], { type: 'text/html;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+
+        const printWin = window.open(url, '_blank');
+        if (printWin) {
+          printWin.focus();
+          setTimeout(() => {
+            try {
+              printWin.print();
+            } catch (_) {}
+          }, 600);
+        } else {
+          // Fallback if popup blocked: use hidden iframe
+          const iframe = document.createElement('iframe');
+          iframe.style.position = 'fixed';
+          iframe.style.right = '0';
+          iframe.style.bottom = '0';
+          iframe.style.width = '0';
+          iframe.style.height = '0';
+          iframe.style.border = '0';
+          document.body.appendChild(iframe);
+          iframe.onload = () => {
+            setTimeout(() => {
+              try {
+                iframe.contentWindow.focus();
+                iframe.contentWindow.print();
+              } catch (_) {}
+              setTimeout(() => {
+                if (iframe.parentNode) document.body.removeChild(iframe);
+                URL.revokeObjectURL(url);
+              }, 2000);
+            }, 300);
+          };
+          iframe.src = url;
+        }
+      } catch (webErr) {
+        console.warn('Web print error:', webErr);
+        Alert.alert('Print Notice', 'Could not open print window. Please allow popups for this site.');
+      }
+      return;
+    }
+
+    // 2. MOBILE PLATFORM: Expo Go (Android & iOS)
+    try {
+      const { uri } = await Print.printToFileAsync({ html: htmlContent });
+      const safeFilename = `${filenamePrefix || 'jagori_trees'}_${todayStr}_${Date.now()}.pdf`;
+      const targetUri = `${FileSystem.cacheDirectory}${safeFilename}`;
+      await FileSystem.copyAsync({ from: uri, to: targetUri });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(targetUri, {
+          mimeType: 'application/pdf',
+          dialogTitle: documentTitle,
+          UTI: 'com.adobe.pdf',
+        });
+      } else {
+        await Print.printAsync({ html: htmlContent });
+      }
+    } catch (mobileErr) {
+      console.warn('Mobile PDF share error, attempting system Print fallback:', mobileErr);
+      try {
+        await Print.printAsync({ html: htmlContent });
+      } catch (printErr) {
+        console.warn('System print manager error:', printErr);
+        Alert.alert(
+          'Export Notice',
+          'Unable to open print or share dialog on this device. Please check app permissions.'
+        );
+      }
+    }
   };
 
   // Generate and Print Multi-Page A4 QR Sheet for Batch Tree Plantations
@@ -1698,23 +1804,11 @@ export default function App() {
       </html>
     `;
 
-      if (Platform.OS === 'web') {
-        await Print.printAsync({ html: fullHtml });
-      } else {
-        try {
-          const { uri } = await Print.printToFileAsync({ html: fullHtml });
-          if (await Sharing.isAvailableAsync()) {
-            await Sharing.shareAsync(uri, {
-              mimeType: 'application/pdf',
-              dialogTitle: `Jagori Tree QR Sheet (${dateLabel})`,
-            });
-          } else {
-            await Print.printAsync({ html: fullHtml });
-          }
-        } catch (_fileErr) {
-          await Print.printAsync({ html: fullHtml });
-        }
-      }
+      await executePrintOrShareDocument(
+        fullHtml,
+        `Jagori A4 Tree QR Tags - ${dateLabel}`,
+        `jagori_batch_${dateLabel}`
+      );
     } catch (err) {
       console.warn('Batch print error:', err);
       Alert.alert('Print Error', 'Unable to generate A4 printable sheet.');
