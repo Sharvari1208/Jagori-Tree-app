@@ -321,7 +321,7 @@ export default function App() {
   // Batch A4 QR Print State
   const [showBatchPrintModal, setShowBatchPrintModal] = useState(false);
   const [batchSelectedDate, setBatchSelectedDate] = useState('ALL');
-  const [batchTagDensity, setBatchTagDensity] = useState(6); // 6 (Standard) or 4 (Large)
+  const [batchTagDensity, setBatchTagDensity] = useState(16); // 16 (Compact Default), 12, 20, 24
   const [batchQrType, setBatchQrType] = useState('OFFLINE'); // 'OFFLINE' | 'WEB'
   const [isBatchPrinting, setIsBatchPrinting] = useState(false);
 
@@ -1480,11 +1480,11 @@ export default function App() {
     }
   };
 
-  // Generate and Print Multi-Page A4 QR Sheet for Batch Tree Plantations
+  // Generate and Print Multi-Page A4 QR Sheet for Batch Tree Plantations (Compact & Zero Waste)
   const handlePrintBatchA4Sheet = async (
     treesToPrint,
     dateLabel = 'Batch Plantation',
-    density = 6,
+    density = 16,
     qrType = qrCodeType
   ) => {
     if (!treesToPrint || treesToPrint.length === 0) {
@@ -1495,7 +1495,7 @@ export default function App() {
     try {
       setIsBatchPrinting(true);
 
-      const pageSize = density === 4 ? 4 : 6;
+      const pageSize = Number(density) || 16;
       const totalPages = Math.ceil(treesToPrint.length / pageSize);
 
       // Split trees into page chunks
@@ -1504,7 +1504,49 @@ export default function App() {
         pages.push(treesToPrint.slice(i, i + pageSize));
       }
 
-      const qrSize = pageSize === 4 ? 140 : 105;
+      let cols = 4;
+      let rows = 4;
+      let qrSize = 92;
+      let idFontSize = '9.5px';
+      let speciesFontSize = '11px';
+
+      if (pageSize === 24) {
+        cols = 4;
+        rows = 6;
+        qrSize = 70;
+        idFontSize = '8.5px';
+        speciesFontSize = '10px';
+      } else if (pageSize === 20) {
+        cols = 4;
+        rows = 5;
+        qrSize = 82;
+        idFontSize = '9px';
+        speciesFontSize = '10.5px';
+      } else if (pageSize === 16) {
+        cols = 4;
+        rows = 4;
+        qrSize = 92;
+        idFontSize = '9.5px';
+        speciesFontSize = '11px';
+      } else if (pageSize === 12) {
+        cols = 3;
+        rows = 4;
+        qrSize = 105;
+        idFontSize = '10.5px';
+        speciesFontSize = '12px';
+      } else if (pageSize === 8) {
+        cols = 2;
+        rows = 4;
+        qrSize = 115;
+        idFontSize = '11px';
+        speciesFontSize = '13px';
+      } else if (pageSize === 6) {
+        cols = 2;
+        rows = 3;
+        qrSize = 125;
+        idFontSize = '12px';
+        speciesFontSize = '14px';
+      }
 
       const pagesHtml = pages
         .map((pageTrees, pageIndex) => {
@@ -1522,18 +1564,11 @@ export default function App() {
 
               return `
               <div class="tag-card">
-                <span class="cut-guide">✂️ Cut</span>
-                <div class="tag-top">
-                  <span class="tag-brand">🌿 JAGORI FOUNDATION</span>
-                  <span class="tag-qr-type">${qrType === 'OFFLINE' ? '📴 OFFLINE' : '🌐 WEB'}</span>
+                <div class="tag-qr-wrap">
+                  <img class="tag-qr-img" src="${qrImageUrl}" width="${qrSize}" height="${qrSize}" alt="QR" />
                 </div>
-                <div class="tag-content">
-                  <div class="tag-qr-wrap">
-                    <img class="tag-qr-img" src="${qrImageUrl}" width="${qrSize}" height="${qrSize}" alt="QR Code" />
-                  </div>
-                  <div class="tag-id-small">${escapeHtml(tree.treeId)}</div>
-                  <div class="tag-species-name">${escapeHtml(tree.species || 'Specimen')}</div>
-                </div>
+                <div class="tag-id-small" style="font-size: ${idFontSize};">${escapeHtml(tree.treeId)}</div>
+                <div class="tag-species-name" style="font-size: ${speciesFontSize};">${escapeHtml(tree.species || 'Specimen')}</div>
               </div>
             `;
             })
@@ -1541,21 +1576,13 @@ export default function App() {
 
           return `
           <div class="page-container">
-            <div class="batch-header">
-              <div>
-                <div class="batch-title">🌿 JAGORI FOUNDATION • TREE CONSERVATION PROJECT</div>
-                <div class="batch-sub">Field Plantation QR Tags • Batch Date: <strong>${escapeHtml(dateLabel)}</strong></div>
-              </div>
-              <div class="batch-page-badge">Page ${pageNum} of ${totalPages} (${pageTrees.length} Tags)</div>
+            <div class="batch-header-strip">
+              <span>🌿 <strong>JAGORI FOUNDATION</strong> • Batch: ${escapeHtml(dateLabel)}</span>
+              <span>✂️ Cut along dashed lines • Page ${pageNum} of ${totalPages} (${pageTrees.length} Tags)</span>
             </div>
 
-            <div class="${pageSize === 4 ? 'grid-4' : 'grid-6'}">
+            <div class="tags-grid" style="grid-template-columns: repeat(${cols}, 1fr); grid-template-rows: repeat(${rows}, 1fr);">
               ${tagsHtml}
-            </div>
-
-            <div class="batch-footer">
-              <span>✂️ Cut along dashed lines. Laminate or place in waterproof sleeve before tying to tree stake.</span>
-              <span>Total Planted in Batch: ${treesToPrint.length} Trees</span>
             </div>
           </div>
         `;
@@ -1568,12 +1595,12 @@ export default function App() {
         <head>
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-          <title>Jagori A4 QR Tags - ${escapeHtml(dateLabel)}</title>
+          <title>Jagori Compact A4 QR Tags - ${escapeHtml(dateLabel)}</title>
           <style>
             * { box-sizing: border-box; margin: 0; padding: 0; }
             @page {
               size: A4 portrait;
-              margin: 8mm 8mm;
+              margin: 4mm 4mm;
             }
             body {
               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
@@ -1584,154 +1611,82 @@ export default function App() {
             }
             .page-container {
               width: 100%;
-              max-width: 194mm;
+              max-width: 202mm;
+              height: 289mm;
+              max-height: 289mm;
               margin: 0 auto;
               page-break-after: always;
               break-after: page;
-              padding: 4mm 0;
               display: flex;
               flex-direction: column;
-              min-height: 275mm;
-              max-height: 278mm;
-              justify-content: space-between;
+              justify-content: flex-start;
+              box-sizing: border-box;
             }
             .page-container:last-child {
               page-break-after: auto;
               break-after: auto;
             }
-            .batch-header {
-              border-bottom: 2px solid #15803d;
-              padding-bottom: 5px;
-              margin-bottom: 8px;
+            .batch-header-strip {
               display: flex;
               justify-content: space-between;
-              align-items: flex-end;
-            }
-            .batch-title {
-              font-size: 13px;
-              font-weight: 800;
-              color: #14532d;
-              letter-spacing: 0.5px;
-            }
-            .batch-sub {
-              font-size: 11px;
+              align-items: center;
+              font-size: 8.5px;
               color: #15803d;
-              font-weight: 600;
-              margin-top: 1px;
+              padding: 2px 4px;
+              margin-bottom: 3px;
+              border-bottom: 1px solid #86efac;
+              flex-shrink: 0;
             }
-            .batch-page-badge {
-              font-size: 10px;
-              font-weight: bold;
-              color: #334155;
-              background: #f1f5f9;
-              padding: 3px 8px;
-              border-radius: 6px;
-              border: 1px solid #cbd5e1;
-            }
-            .grid-6 {
+            .tags-grid {
               display: grid;
-              grid-template-columns: repeat(2, 1fr);
-              grid-template-rows: repeat(3, 1fr);
-              grid-gap: 8px;
+              grid-gap: 2px;
               flex: 1;
-            }
-            .grid-4 {
-              display: grid;
-              grid-template-columns: repeat(2, 1fr);
-              grid-template-rows: repeat(2, 1fr);
-              grid-gap: 12px;
-              flex: 1;
+              width: 100%;
+              height: 100%;
             }
             .tag-card {
-              border: 2px dashed #64748b;
-              border-radius: 8px;
-              padding: 6px 8px;
+              border: 1px dashed #94a3b8;
+              border-radius: 4px;
+              padding: 4px 2px;
               background: #ffffff;
               display: flex;
               flex-direction: column;
-              justify-content: flex-start;
-              align-items: center;
-              position: relative;
-              overflow: hidden;
-              text-align: center;
-            }
-            .cut-guide {
-              position: absolute;
-              top: 4px;
-              right: 8px;
-              font-size: 8px;
-              color: #94a3b8;
-              font-weight: bold;
-            }
-            .tag-top {
-              width: 100%;
-              border-bottom: 1px solid #e2e8f0;
-              padding-bottom: 3px;
-              margin-bottom: 5px;
-              display: flex;
-              justify-content: space-between;
-              align-items: center;
-              padding-right: 36px;
-            }
-            .tag-brand {
-              font-size: 9px;
-              font-weight: 800;
-              color: #15803d;
-              letter-spacing: 0.5px;
-            }
-            .tag-qr-type {
-              font-size: 8px;
-              font-weight: 700;
-              color: #475569;
-              background: #f1f5f9;
-              padding: 1px 5px;
-              border-radius: 3px;
-              border: 1px solid #cbd5e1;
-            }
-            .tag-content {
-              display: flex;
-              flex-direction: column;
-              align-items: center;
               justify-content: center;
-              width: 100%;
-              flex: 1;
+              align-items: center;
+              text-align: center;
+              overflow: hidden;
+              box-sizing: border-box;
             }
             .tag-qr-wrap {
-              background: #ffffff;
-              padding: 4px;
-              border-radius: 6px;
-              border: 1px solid #cbd5e1;
-              display: inline-block;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              margin-bottom: 2px;
             }
             .tag-qr-img {
               display: block;
               margin: 0 auto;
             }
             .tag-id-small {
-              font-size: 11px;
               font-family: monospace, monospace;
-              color: #475569;
+              color: #334155;
               font-weight: 600;
-              margin-top: 5px;
-              letter-spacing: 0.5px;
+              line-height: 1.15;
+              letter-spacing: 0.3px;
+              white-space: nowrap;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              max-width: 96%;
             }
             .tag-species-name {
-              font-size: 13px;
               font-weight: 700;
               color: #15803d;
-              margin-top: 2px;
-              max-width: 95%;
+              line-height: 1.15;
+              max-width: 96%;
               word-break: break-word;
-              line-height: 1.25;
-            }
-            .batch-footer {
-              border-top: 1px dashed #cbd5e1;
-              padding-top: 3px;
-              margin-top: 6px;
-              display: flex;
-              justify-content: space-between;
-              font-size: 9px;
-              color: #64748b;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              margin-top: 1px;
             }
           </style>
         </head>
@@ -1743,8 +1698,8 @@ export default function App() {
 
       await executePrintOrShareDocument(
         fullHtml,
-        `Jagori A4 Tree QR Tags - ${dateLabel}`,
-        `jagori_batch_${dateLabel}`
+        `Jagori Compact A4 QR Tags - ${dateLabel}`,
+        `jagori_compact_tags_${dateLabel}`
       );
     } catch (err) {
       console.warn('Batch print error:', err);
@@ -3472,43 +3427,81 @@ export default function App() {
               </ScrollView>
 
               {/* Section 2: Choose Tag Density / Size */}
-              <Text style={styles.batchSectionTitle}>2. Tags per A4 Sheet (Size & Density):</Text>
+              <Text style={styles.batchSectionTitle}>2. Tags per A4 Sheet (Compact Grid):</Text>
               <View style={styles.batchDensityRow}>
                 <TouchableOpacity
                   style={[
                     styles.batchDensityCard,
-                    batchTagDensity === 6 && styles.batchDensityCardActive,
+                    batchTagDensity === 16 && styles.batchDensityCardActive,
                   ]}
-                  onPress={() => setBatchTagDensity(6)}
+                  onPress={() => setBatchTagDensity(16)}
                 >
                   <View style={styles.batchDensityRadio}>
                     <Text style={styles.batchDensityRadioIcon}>
-                      {batchTagDensity === 6 ? '🔘' : '⚪'}
+                      {batchTagDensity === 16 ? '🔘' : '⚪'}
                     </Text>
-                    <Text style={styles.batchDensityTitle}>6 Tags per Sheet</Text>
+                    <Text style={styles.batchDensityTitle}>16 Tags per Sheet (4×4 Grid)</Text>
                   </View>
-                  <Text style={styles.batchDensityBadge}>Standard Field Tags • Recommended</Text>
+                  <Text style={styles.batchDensityBadge}>Compact • Recommended • Minimal Waste</Text>
                   <Text style={styles.batchDensitySub}>
-                    2 columns × 3 rows. Crisp ~3.6 in. × 3.4 in. tag boxes with bold QR, species &amp; cut guidelines.
+                    4 columns × 4 rows. Clean compact tags with zero wasted whitespace.
                   </Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
                   style={[
                     styles.batchDensityCard,
-                    batchTagDensity === 4 && styles.batchDensityCardActive,
+                    batchTagDensity === 12 && styles.batchDensityCardActive,
                   ]}
-                  onPress={() => setBatchTagDensity(4)}
+                  onPress={() => setBatchTagDensity(12)}
                 >
                   <View style={styles.batchDensityRadio}>
                     <Text style={styles.batchDensityRadioIcon}>
-                      {batchTagDensity === 4 ? '🔘' : '⚪'}
+                      {batchTagDensity === 12 ? '🔘' : '⚪'}
                     </Text>
-                    <Text style={styles.batchDensityTitle}>4 Tags per Sheet</Text>
+                    <Text style={styles.batchDensityTitle}>12 Tags per Sheet (3×4 Grid)</Text>
                   </View>
-                  <Text style={styles.batchDensityBadge}>Large Plaque Tags</Text>
+                  <Text style={styles.batchDensityBadge}>Standard Field Tags</Text>
                   <Text style={styles.batchDensitySub}>
-                    2 columns × 2 rows. Large ~3.6 in. × 5.1 in. plates with extra-large QR codes for tree trunks.
+                    3 columns × 4 rows. Slightly larger QR codes with generous spacing.
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.batchDensityCard,
+                    batchTagDensity === 20 && styles.batchDensityCardActive,
+                  ]}
+                  onPress={() => setBatchTagDensity(20)}
+                >
+                  <View style={styles.batchDensityRadio}>
+                    <Text style={styles.batchDensityRadioIcon}>
+                      {batchTagDensity === 20 ? '🔘' : '⚪'}
+                    </Text>
+                    <Text style={styles.batchDensityTitle}>20 Tags per Sheet (4×5 Grid)</Text>
+                  </View>
+                  <Text style={styles.batchDensityBadge}>High Density</Text>
+                  <Text style={styles.batchDensitySub}>
+                    4 columns × 5 rows. Maximize paper savings for large batch plantations.
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.batchDensityCard,
+                    batchTagDensity === 24 && styles.batchDensityCardActive,
+                  ]}
+                  onPress={() => setBatchTagDensity(24)}
+                >
+                  <View style={styles.batchDensityRadio}>
+                    <Text style={styles.batchDensityRadioIcon}>
+                      {batchTagDensity === 24 ? '🔘' : '⚪'}
+                    </Text>
+                    <Text style={styles.batchDensityTitle}>24 Tags per Sheet (4×6 Grid)</Text>
+                  </View>
+                  <Text style={styles.batchDensityBadge}>Ultra-Compact</Text>
+                  <Text style={styles.batchDensitySub}>
+                    4 columns × 6 rows. High-efficiency tags for nursery saplings and stakes.
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -3580,7 +3573,7 @@ export default function App() {
                       • Format: <Text style={styles.batchSummaryBold}>{batchQrType === 'OFFLINE' ? 'Self-Contained Specimen Tag (Works 100% Offline)' : 'Web Certificate Link'}</Text>.
                     </Text>
                     <Text style={styles.batchSummaryHint}>
-                      ✂️ Each tag includes a dashed cutting border, QR code, Tree ID, and Species name.
+                      ✂️ Compact grid layout with dashed cut lines, QR code, small Tree ID, and species name. Zero wasted space.
                     </Text>
                   </View>
                 );
