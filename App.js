@@ -1814,7 +1814,7 @@ export default function App() {
           keyboardHeight > 0 && { paddingBottom: keyboardHeight + 120 },
         ]}
         keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
+        keyboardDismissMode="none"
         showsVerticalScrollIndicator={true}
       >
       {/* ============================================================== */}
@@ -2471,6 +2471,7 @@ export default function App() {
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 style={styles.speciesChipsContainer}
+                keyboardShouldPersistTaps="always"
               >
                 {COMMON_SPECIES.map((s) => (
                   <TouchableOpacity
@@ -3304,6 +3305,7 @@ export default function App() {
                   horizontal
                   showsHorizontalScrollIndicator={false}
                   style={styles.quickChipsScroll}
+                  keyboardShouldPersistTaps="always"
                 >
                   {trees.map((t) => (
                     <TouchableOpacity
