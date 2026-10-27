@@ -309,20 +309,15 @@ export default function App() {
   const [isLoadingPublicTree, setIsLoadingPublicTree] = useState(Boolean(initialScannedTreeId));
   const [isAdminPreview, setIsAdminPreview] = useState(false);
 
-  // QR Mode: 'OFFLINE' (Self-contained, works everywhere without Wi-Fi/Internet) | 'WEB' (Public URL)
-  const [qrCodeType, setQrCodeType] = useState('OFFLINE');
-
   // Offline & Cloud Sync State
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const [cloudSyncStatus, setCloudSyncStatus] = useState('SYNCED'); // 'SYNCED' | 'PENDING' | 'SYNCING' | 'OFFLINE'
 
-
   // Batch A4 QR Print State
   const [showBatchPrintModal, setShowBatchPrintModal] = useState(false);
   const [batchSelectedDate, setBatchSelectedDate] = useState('ALL');
   const [batchTagDensity, setBatchTagDensity] = useState(16); // 16 (Compact Default), 12, 20, 24
-  const [batchQrType, setBatchQrType] = useState('OFFLINE'); // 'OFFLINE' | 'WEB'
   const [isBatchPrinting, setIsBatchPrinting] = useState(false);
 
   // ==========================================
@@ -979,43 +974,64 @@ export default function App() {
   const handleSearchTree = async (idToSearch) => {
     const query = (idToSearch || searchTreeId).trim();
     if (!query) {
-      Alert.alert('Validation Error', 'Please enter a Tree ID to search.');
+      Alert.alert('Search Required', 'Please enter a term (Tree ID, species, village, donor, date, etc.) to search.');
       return;
     }
 
-    // 1. Try local cache first
-    const foundLocal = trees.find((t) => t.treeId.toLowerCase() === query.toLowerCase());
+    const qLower = query.toLowerCase();
+
+    // 1. Try local cache across all categories:
+    // Check exact Tree ID first
+    let foundLocal = trees.find((t) => t.treeId.toLowerCase() === qLower);
+
+    // If not found by exact ID, search across all categories (species, village, donor, date, status, etc.)
+    if (!foundLocal) {
+      foundLocal = trees.find(
+        (t) =>
+          (t.treeId && t.treeId.toLowerCase().includes(qLower)) ||
+          (t.species && t.species.toLowerCase().includes(qLower)) ||
+          (t.village && t.village.toLowerCase().includes(qLower)) ||
+          (t.donorName && t.donorName.toLowerCase().includes(qLower)) ||
+          (t.plantationDate && t.plantationDate.toLowerCase().includes(qLower)) ||
+          (t.survivalStatus && t.survivalStatus.toLowerCase().includes(qLower)) ||
+          (t.height && t.height.toLowerCase().includes(qLower)) ||
+          (t.girth && t.girth.toLowerCase().includes(qLower)) ||
+          (t.lastInspection && t.lastInspection.toLowerCase().includes(qLower))
+      );
+    }
+
     if (foundLocal) {
       applySelectedTree(foundLocal);
       return;
     }
 
-    // 2. Query Supabase if connected
+    // 2. Query Supabase across all categories if connected
     if (isSupabaseConfigured && supabase) {
       setIsSearching(true);
       try {
         const { data, error } = await supabase
           .from('trees')
           .select('*')
-          .eq('tree_id', query)
-          .single();
+          .or(`tree_id.ilike.%${query}%,species.ilike.%${query}%,village.ilike.%${query}%,donor_name.ilike.%${query}%,survival_status.ilike.%${query}%,plantation_date.ilike.%${query}%`)
+          .limit(1);
 
-        if (data && !error) {
+        if (data && data.length > 0 && !error) {
+          const row = data[0];
           const loadedTree = {
-            treeId: data.tree_id,
-            species: data.species,
-            plantationDate: data.plantation_date,
-            lat: data.latitude,
-            lng: data.longitude,
-            donorName: data.donor_name || 'Jagori Community',
-            village: data.village || 'General Habitat',
-            treePhoto: data.tree_photo_url,
-            treePhotoBase64: data.tree_photo_url,
-            height: data.height || 'Not Measured',
-            girth: data.girth || 'Not Measured',
-            lastInspection: data.last_inspection || todayStr,
-            survivalStatus: data.survival_status || 'Healthy',
-            url: data.public_url || buildPublicTreeUrl(data.tree_id),
+            treeId: row.tree_id,
+            species: row.species,
+            plantationDate: row.plantation_date,
+            lat: row.latitude,
+            lng: row.longitude,
+            donorName: row.donor_name || 'Jagori Community',
+            village: row.village || 'General Habitat',
+            treePhoto: row.tree_photo_url,
+            treePhotoBase64: row.tree_photo_url,
+            height: row.height || 'Not Measured',
+            girth: row.girth || 'Not Measured',
+            lastInspection: row.last_inspection || todayStr,
+            survivalStatus: row.survival_status || 'Healthy',
+            url: row.public_url || buildPublicTreeUrl(row.tree_id),
           };
           setTrees((prev) => [loadedTree, ...prev.filter((t) => t.treeId !== loadedTree.treeId)]);
           applySelectedTree(loadedTree);
@@ -1029,7 +1045,10 @@ export default function App() {
       }
     }
 
-    Alert.alert('Not Found', `No tree record found with ID "${query}".`);
+    Alert.alert(
+      'Not Found',
+      `No tree record found matching "${query}".\n\nTry searching by species, village, donor name, date, or Tree ID.`
+    );
   };
 
   // Save Updates to Tree (Supabase & Local)
@@ -1163,11 +1182,9 @@ export default function App() {
   // Download or Share High-Resolution QR Code Image Directly (PNG)
   const handleDownloadQrImage = async (tree) => {
     if (!tree) return;
-    const qrData =
-      qrCodeType === 'OFFLINE'
-        ? (tree.qrText || buildTreeQrText(tree))
-        : (tree.url || buildPublicTreeUrl(tree.treeId));
-    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&ecc=M&margin=1&data=${encodeURIComponent(
+    const qrData = tree.url || buildPublicTreeUrl(tree.treeId);
+    // 1000x1000 px source image with zero margin so the QR code fills the image completely
+    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&ecc=M&margin=0&data=${encodeURIComponent(
       qrData
     )}`;
 
@@ -1206,17 +1223,14 @@ export default function App() {
     }
   };
 
-  // Export Printable Single Tree QR Tag (PDF) - Same clean format as sheets with crystal-clear 800x800 QR
+  // Export Printable Single Tree QR Tag (PDF) - Same clean format as sheets with large, crystal-clear QR
   const handleExportPDF = async (treeToExport) => {
     if (!treeToExport) return;
 
-    const qrData =
-      qrCodeType === 'OFFLINE'
-        ? (treeToExport.qrText || buildTreeQrText(treeToExport))
-        : (treeToExport.url || buildPublicTreeUrl(treeToExport.treeId));
+    const qrData = treeToExport.url || buildPublicTreeUrl(treeToExport.treeId);
 
-    // High resolution 800x800 source image with Medium error correction & tight margin for maximum sharpness
-    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=800x800&ecc=M&margin=1&data=${encodeURIComponent(
+    // High resolution 1000x1000 source image with Medium error correction & ZERO margin for maximum QR size & clarity
+    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&ecc=M&margin=0&data=${encodeURIComponent(
       qrData
     )}`;
 
@@ -1242,7 +1256,7 @@ export default function App() {
               align-items: center;
               justify-content: center;
               min-height: 90vh;
-              padding: 24px;
+              padding: 20px;
               -webkit-print-color-adjust: exact;
               print-color-adjust: exact;
             }
@@ -1255,10 +1269,10 @@ export default function App() {
               }
             }
             .tag-card {
-              width: 300px;
-              border: 2px dashed #64748b;
+              width: 320px;
+              border: 2px dashed #475569;
               border-radius: 8px;
-              padding: 18px 16px;
+              padding: 14px 10px;
               background: #ffffff;
               display: flex;
               flex-direction: column;
@@ -1283,7 +1297,7 @@ export default function App() {
               font-size: 10px;
               color: #15803d;
               padding-bottom: 6px;
-              margin-bottom: 12px;
+              margin-bottom: 6px;
               border-bottom: 1px solid #e2e8f0;
             }
             .tag-badge {
@@ -1299,14 +1313,14 @@ export default function App() {
               display: flex;
               align-items: center;
               justify-content: center;
-              padding: 6px;
-              background: #ffffff;
-              margin-bottom: 8px;
+              padding: 0;
+              margin: 2px 0 6px 0;
+              width: 100%;
             }
             .tag-qr-img {
               display: block;
-              width: 190px;
-              height: 190px;
+              width: 270px;
+              height: 270px;
               margin: 0 auto;
               image-rendering: -webkit-optimize-contrast;
               image-rendering: crisp-edges;
@@ -1315,7 +1329,7 @@ export default function App() {
             .tag-id-small {
               font-family: monospace, monospace;
               color: #334155;
-              font-size: 13px;
+              font-size: 13.5px;
               font-weight: 700;
               letter-spacing: 0.5px;
               margin-top: 4px;
@@ -1328,15 +1342,15 @@ export default function App() {
             .tag-species-name {
               font-weight: 700;
               color: #15803d;
-              font-size: 16px;
-              margin-top: 3px;
+              font-size: 17px;
+              margin-top: 2px;
               line-height: 1.25;
               max-width: 96%;
               word-break: break-word;
             }
             .tag-cut-guideline {
-              margin-top: 14px;
-              padding-top: 8px;
+              margin-top: 12px;
+              padding-top: 6px;
               border-top: 1px dashed #cbd5e1;
               font-size: 9.5px;
               color: #64748b;
@@ -1348,10 +1362,10 @@ export default function App() {
           <div class="tag-card">
             <div class="tag-header-strip">
               <span>🌿 <strong>JAGORI FOUNDATION</strong></span>
-              <span class="tag-badge">${qrCodeType === 'OFFLINE' ? '📴 OFFLINE TAG' : '🌐 WEB TAG'}</span>
+              <span class="tag-badge">FIELD SPECIMEN TAG</span>
             </div>
             <div class="tag-qr-wrap">
-              <img class="tag-qr-img" src="${qrImageUrl}" width="190" height="190" alt="Tree QR Code" />
+              <img class="tag-qr-img" src="${qrImageUrl}" width="270" height="270" alt="Tree QR Code" />
             </div>
             <div class="tag-id-small">${escapeHtml(treeToExport.treeId)}</div>
             <div class="tag-species-name">${escapeHtml(treeToExport.species || 'Specimen')}</div>
@@ -1485,12 +1499,11 @@ export default function App() {
     }
   };
 
-  // Generate and Print Multi-Page A4 QR Sheet for Batch Tree Plantations (Compact & Zero Waste)
+  // Generate and Print Multi-Page A4 QR Sheet for Batch Tree Plantations (Compact & Big Clear QRs)
   const handlePrintBatchA4Sheet = async (
     treesToPrint,
     dateLabel = 'Batch Plantation',
-    density = 16,
-    qrType = qrCodeType
+    density = 16
   ) => {
     if (!treesToPrint || treesToPrint.length === 0) {
       Alert.alert('Notice', 'No trees available in this batch to print.');
@@ -1511,46 +1524,46 @@ export default function App() {
 
       let cols = 4;
       let rows = 4;
-      let qrSize = 92;
-      let idFontSize = '9.5px';
-      let speciesFontSize = '11px';
+      let qrSize = 138;
+      let idFontSize = '10px';
+      let speciesFontSize = '12px';
 
       if (pageSize === 24) {
         cols = 4;
         rows = 6;
-        qrSize = 70;
-        idFontSize = '8.5px';
-        speciesFontSize = '10px';
+        qrSize = 105;
+        idFontSize = '9px';
+        speciesFontSize = '11px';
       } else if (pageSize === 20) {
         cols = 4;
         rows = 5;
-        qrSize = 82;
-        idFontSize = '9px';
-        speciesFontSize = '10.5px';
+        qrSize = 120;
+        idFontSize = '9.5px';
+        speciesFontSize = '11.5px';
       } else if (pageSize === 16) {
         cols = 4;
         rows = 4;
-        qrSize = 92;
-        idFontSize = '9.5px';
-        speciesFontSize = '11px';
+        qrSize = 138;
+        idFontSize = '10px';
+        speciesFontSize = '12px';
       } else if (pageSize === 12) {
         cols = 3;
         rows = 4;
-        qrSize = 105;
-        idFontSize = '10.5px';
-        speciesFontSize = '12px';
+        qrSize = 155;
+        idFontSize = '11px';
+        speciesFontSize = '13px';
       } else if (pageSize === 8) {
         cols = 2;
         rows = 4;
-        qrSize = 115;
-        idFontSize = '11px';
-        speciesFontSize = '13px';
+        qrSize = 180;
+        idFontSize = '12px';
+        speciesFontSize = '14px';
       } else if (pageSize === 6) {
         cols = 2;
         rows = 3;
-        qrSize = 125;
-        idFontSize = '12px';
-        speciesFontSize = '14px';
+        qrSize = 210;
+        idFontSize = '13px';
+        speciesFontSize = '15px';
       }
 
       const pagesHtml = pages
@@ -1558,12 +1571,10 @@ export default function App() {
           const pageNum = pageIndex + 1;
           const tagsHtml = pageTrees
             .map((tree) => {
-              const qrData =
-                qrType === 'OFFLINE'
-                  ? (tree.qrText || buildTreeQrText(tree))
-                  : (tree.url || buildPublicTreeUrl(tree.treeId));
+              const qrData = tree.url || buildPublicTreeUrl(tree.treeId);
 
-              const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&ecc=M&margin=1&data=${encodeURIComponent(
+              // 600x600 source resolution with zero margin so the QR modules fill the square completely
+              const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&ecc=M&margin=0&data=${encodeURIComponent(
                 qrData
               )}`;
 
@@ -1796,17 +1807,21 @@ export default function App() {
     }
   };
 
-  // Filtered Trees for Update Tree Screen (Real-time search or full list)
+  // Filtered Trees for Update Tree Screen (Real-time search across ALL categories)
   const filteredTreesForUpdate = React.useMemo(() => {
     if (!searchTreeId.trim()) return trees;
     const q = searchTreeId.toLowerCase().trim();
     return trees.filter(
       (t) =>
-        t.treeId.toLowerCase().includes(q) ||
-        t.species.toLowerCase().includes(q) ||
+        (t.treeId && t.treeId.toLowerCase().includes(q)) ||
+        (t.species && t.species.toLowerCase().includes(q)) ||
         (t.village && t.village.toLowerCase().includes(q)) ||
         (t.plantationDate && t.plantationDate.toLowerCase().includes(q)) ||
-        (t.donorName && t.donorName.toLowerCase().includes(q))
+        (t.donorName && t.donorName.toLowerCase().includes(q)) ||
+        (t.survivalStatus && t.survivalStatus.toLowerCase().includes(q)) ||
+        (t.height && t.height.toLowerCase().includes(q)) ||
+        (t.girth && t.girth.toLowerCase().includes(q)) ||
+        (t.lastInspection && t.lastInspection.toLowerCase().includes(q))
     );
   }, [trees, searchTreeId]);
 
@@ -2744,57 +2759,20 @@ export default function App() {
               <Text style={styles.treeId}>{savedTree.treeId}</Text>
 
               <View style={styles.qrWrapper}>
-                <View style={styles.qrToggleRow}>
-                  <TouchableOpacity
-                    style={[styles.qrToggleBtn, qrCodeType === 'OFFLINE' && styles.qrToggleBtnActive]}
-                    onPress={() => setQrCodeType('OFFLINE')}
-                  >
-                    <Text
-                      style={[
-                        styles.qrToggleBtnText,
-                        qrCodeType === 'OFFLINE' && styles.qrToggleBtnTextActive,
-                      ]}
-                    >
-                      📴 Offline Info (No Wi-Fi)
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.qrToggleBtn, qrCodeType === 'WEB' && styles.qrToggleBtnActive]}
-                    onPress={() => setQrCodeType('WEB')}
-                  >
-                    <Text
-                      style={[
-                        styles.qrToggleBtnText,
-                        qrCodeType === 'WEB' && styles.qrToggleBtnTextActive,
-                      ]}
-                    >
-                      🌐 Web Link
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-
                 <QRCode
-                  value={
-                    qrCodeType === 'OFFLINE'
-                      ? (savedTree.qrText || buildTreeQrText(savedTree))
-                      : savedTree.url
-                  }
-                  size={170}
+                  value={savedTree.url || buildPublicTreeUrl(savedTree.treeId)}
+                  size={230}
                 />
                 <Text style={styles.qrTreeIdSmall}>{savedTree.treeId}</Text>
                 <Text style={styles.qrSpeciesBelow}>{savedTree.species}</Text>
                 <Text style={styles.qrUrlText}>
-                  {qrCodeType === 'OFFLINE'
-                    ? '✓ Self-contained specimen record. Works on ANY phone camera without Wi-Fi or internet.'
-                    : savedTree.url}
+                  {savedTree.url || buildPublicTreeUrl(savedTree.treeId)}
                 </Text>
               </View>
 
               <View style={styles.qrScannableNote}>
                 <Text style={styles.qrScannableText}>
-                  {qrCodeType === 'OFFLINE'
-                    ? '📱 Anyone scanning this QR tag with an iPhone or Android camera immediately sees all tree details & GPS location without needing any network or app.'
-                    : '📱 Anyone scanning this QR code will see the read-only public web certificate without edit access.'}
+                  📱 Anyone scanning this QR tag with any smartphone camera will immediately see this tree’s official profile, growth history & GPS location.
                 </Text>
               </View>
 
@@ -2938,11 +2916,11 @@ export default function App() {
             <View style={styles.updateTreesListContainer}>
               {/* Search Box Card */}
               <View style={styles.card}>
-                <Text style={styles.label}>Search Planted Trees</Text>
+                <Text style={styles.label}>Search Planted Trees Across All Categories</Text>
                 <View style={styles.searchRow}>
                   <TextInput
                     style={[styles.input, styles.searchInput]}
-                    placeholder="Search by ID, species, village, date..."
+                    placeholder="Search by ID, species, village, donor, date, status..."
                     value={searchTreeId}
                     onChangeText={setSearchTreeId}
                     autoCapitalize="none"
@@ -3087,7 +3065,7 @@ export default function App() {
                   </View>
                 </View>
                 <View style={styles.miniQrBadge}>
-                  <QRCode value={selectedTree.url} size={64} />
+                  <QRCode value={selectedTree.url || buildPublicTreeUrl(selectedTree.treeId)} size={84} />
                 </View>
               </View>
 
@@ -3541,45 +3519,7 @@ export default function App() {
                 </TouchableOpacity>
               </View>
 
-              {/* Section 3: QR Code Data Format */}
-              <Text style={styles.batchSectionTitle}>3. QR Code Data Format:</Text>
-              <View style={styles.batchQrToggleRow}>
-                <TouchableOpacity
-                  style={[
-                    styles.batchQrToggleBtn,
-                    batchQrType === 'OFFLINE' && styles.batchQrToggleBtnActive,
-                  ]}
-                  onPress={() => setBatchQrType('OFFLINE')}
-                >
-                  <Text
-                    style={[
-                      styles.batchQrToggleBtnText,
-                      batchQrType === 'OFFLINE' && styles.batchQrToggleBtnTextActive,
-                    ]}
-                  >
-                    📴 Offline Info (Zero Wi-Fi Needed)
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.batchQrToggleBtn,
-                    batchQrType === 'WEB' && styles.batchQrToggleBtnActive,
-                  ]}
-                  onPress={() => setBatchQrType('WEB')}
-                >
-                  <Text
-                    style={[
-                      styles.batchQrToggleBtnText,
-                      batchQrType === 'WEB' && styles.batchQrToggleBtnTextActive,
-                    ]}
-                  >
-                    🌐 Web Link (Online Certificate)
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Section 4: Live Sheet Output Summary */}
+              {/* Section 3: Live Sheet Output Summary */}
               {(() => {
                 const selectedBatch =
                   batchSelectedDate === 'ALL'
@@ -3604,11 +3544,8 @@ export default function App() {
                     <Text style={styles.batchSummaryText}>
                       • Density: <Text style={styles.batchSummaryBold}>{batchTagDensity} tags per sheet</Text> (automatically splits across {pagesNeeded} pages).
                     </Text>
-                    <Text style={styles.batchSummaryText}>
-                      • Format: <Text style={styles.batchSummaryBold}>{batchQrType === 'OFFLINE' ? 'Self-Contained Specimen Tag (Works 100% Offline)' : 'Web Certificate Link'}</Text>.
-                    </Text>
                     <Text style={styles.batchSummaryHint}>
-                      ✂️ Compact grid layout with dashed cut lines, QR code, small Tree ID, and species name. Zero wasted space.
+                      ✂️ Compact grid layout with dashed cut lines, large QR codes, small Tree ID, and species name. Zero wasted space.
                     </Text>
                   </View>
                 );
@@ -3638,8 +3575,7 @@ export default function App() {
                   await handlePrintBatchA4Sheet(
                     selectedBatch,
                     batchSelectedDate === 'ALL' ? 'All Registered Plantations' : batchSelectedDate,
-                    batchTagDensity,
-                    batchQrType
+                    batchTagDensity
                   );
                 }}
               >
@@ -4848,7 +4784,8 @@ const styles = StyleSheet.create({
   qrWrapper: {
     alignItems: 'center',
     marginVertical: 10,
-    padding: 14,
+    padding: 8,
+    paddingVertical: 12,
     backgroundColor: '#fafffa',
     borderRadius: 12,
     borderWidth: 1.5,
