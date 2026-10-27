@@ -1289,7 +1289,8 @@ export default function App() {
             </div>
 
             <div>
-              <span class="tree-id">${treeToExport.treeId}</span>
+              <span class="tree-id">${escapeHtml(treeToExport.treeId)}</span>
+              <div style="font-size: 15px; font-weight: 700; color: #1b5e20; margin-top: 4px; margin-bottom: 8px;">🌳 ${escapeHtml(treeToExport.species || 'Specimen')}</div>
             </div>
 
             ${
@@ -1498,7 +1499,7 @@ export default function App() {
         pages.push(treesToPrint.slice(i, i + pageSize));
       }
 
-      const qrSize = pageSize === 4 ? 130 : 105;
+      const qrSize = pageSize === 4 ? 145 : 120;
 
       const pagesHtml = pages
         .map((pageTrees, pageIndex) => {
@@ -1514,60 +1515,23 @@ export default function App() {
                 qrData
               )}`;
 
-              const statusColor =
-                tree.survivalStatus === 'Healthy'
-                  ? '#166534'
-                  : tree.survivalStatus === 'Needs Care'
-                  ? '#b45309'
-                  : tree.survivalStatus === 'Stunted'
-                  ? '#c2410c'
-                  : '#991b1b';
-
-              const statusBg =
-                tree.survivalStatus === 'Healthy'
-                  ? '#dcfce7'
-                  : tree.survivalStatus === 'Needs Care'
-                  ? '#fef3c7'
-                  : tree.survivalStatus === 'Stunted'
-                  ? '#ffedd5'
-                  : '#fee2e2';
-
               return `
               <div class="tag-card">
                 <span class="cut-guide">✂️ Cut</span>
                 <div class="tag-top">
                   <span class="tag-brand">🌿 JAGORI FOUNDATION</span>
-                  <span class="tag-id">${escapeHtml(tree.treeId)}</span>
+                  <span class="tag-qr-type">${qrType === 'OFFLINE' ? '📴 OFFLINE TAG' : '🌐 WEB TAG'}</span>
                 </div>
                 <div class="tag-body">
                   <div class="tag-qr-box">
                     <img class="tag-qr-img" src="${qrImageUrl}" width="${qrSize}" height="${qrSize}" alt="QR Code" />
-                    <div class="tag-qr-caption">${qrType === 'OFFLINE' ? '📴 OFFLINE TAG' : '🌐 WEB LINK'}</div>
                   </div>
                   <div class="tag-info">
-                    <div class="tag-species">🌳 ${escapeHtml(tree.species || 'Specimen')}</div>
-                    <div class="tag-info-row">
-                      <span class="tag-info-label">Planted:</span>
-                      <span class="tag-info-val">${escapeHtml(tree.plantationDate || dateLabel)}</span>
-                    </div>
-                    <div class="tag-info-row">
-                      <span class="tag-info-label">Village:</span>
-                      <span class="tag-info-val">${escapeHtml(tree.village || 'Field Habitat')}</span>
-                    </div>
-                    <div class="tag-info-row">
-                      <span class="tag-info-label">Donor:</span>
-                      <span class="tag-info-val">${escapeHtml(tree.donorName || 'Jagori Trust')}</span>
-                    </div>
-                    <div class="tag-info-row">
-                      <span class="tag-info-label">GPS:</span>
-                      <span class="tag-info-val">${escapeHtml(tree.lat || 'N/A')}, ${escapeHtml(tree.lng || 'N/A')}</span>
-                    </div>
-                    <div class="tag-info-row" style="margin-top: 3px;">
-                      <span class="tag-status-pill" style="background:${statusBg}; color:${statusColor};">
-                        ● ${escapeHtml(tree.survivalStatus || 'Healthy')}
-                      </span>
-                      ${tree.height ? `<span style="font-size:9px; color:#475569; font-weight:600; margin-left:5px;">📏 ${escapeHtml(tree.height)}</span>` : ''}
-                    </div>
+                    <div class="tag-meta-label">TREE ID</div>
+                    <div class="tag-id-box">${escapeHtml(tree.treeId)}</div>
+
+                    <div class="tag-meta-label" style="margin-top: 10px;">SPECIES</div>
+                    <div class="tag-species-box">🌳 ${escapeHtml(tree.species || 'Specimen')}</div>
                   </div>
                 </div>
               </div>
@@ -1681,7 +1645,7 @@ export default function App() {
             .tag-card {
               border: 2px dashed #64748b;
               border-radius: 8px;
-              padding: 8px 10px;
+              padding: 10px 12px;
               background: #ffffff;
               display: flex;
               flex-direction: column;
@@ -1691,101 +1655,96 @@ export default function App() {
             }
             .cut-guide {
               position: absolute;
-              top: 3px;
-              right: 8px;
+              top: 4px;
+              right: 10px;
               font-size: 9px;
               color: #94a3b8;
               font-weight: bold;
             }
             .tag-top {
               border-bottom: 1px solid #e2e8f0;
-              padding-bottom: 3px;
-              margin-bottom: 5px;
+              padding-bottom: 4px;
+              margin-bottom: 6px;
               display: flex;
               justify-content: space-between;
               align-items: center;
-              padding-right: 36px;
+              padding-right: 44px;
             }
             .tag-brand {
-              font-size: 9px;
+              font-size: 10px;
               font-weight: 800;
               color: #15803d;
               letter-spacing: 0.5px;
             }
-            .tag-id {
-              font-size: 12px;
-              font-weight: 800;
-              color: #0f172a;
-              background: #f1f8e9;
-              border: 1px solid #a5d6a7;
+            .tag-qr-type {
+              font-size: 9px;
+              font-weight: 700;
+              color: #475569;
+              background: #f1f5f9;
               padding: 1px 6px;
               border-radius: 4px;
-              font-family: monospace;
+              border: 1px solid #cbd5e1;
             }
             .tag-body {
               display: flex;
               flex-direction: row;
               align-items: center;
-              gap: 8px;
+              gap: 12px;
               flex: 1;
             }
             .tag-qr-box {
               text-align: center;
-              background: #f8fafc;
-              padding: 4px;
-              border-radius: 6px;
-              border: 1px solid #e2e8f0;
+              background: #ffffff;
+              padding: 6px;
+              border-radius: 8px;
+              border: 1.5px solid #cbd5e1;
               flex-shrink: 0;
+              display: flex;
+              align-items: center;
+              justify-content: center;
             }
             .tag-qr-img {
               display: block;
               margin: 0 auto;
             }
-            .tag-qr-caption {
-              font-size: 8px;
-              color: #64748b;
-              font-weight: bold;
-              margin-top: 2px;
-              letter-spacing: 0.3px;
-            }
             .tag-info {
               flex: 1;
-              font-size: 10px;
-              line-height: 1.35;
-              overflow: hidden;
+              display: flex;
+              flex-direction: column;
+              justify-content: center;
+              min-width: 0;
             }
-            .tag-species {
-              font-size: 12px;
+            .tag-meta-label {
+              font-size: 9px;
+              font-weight: 800;
+              color: #64748b;
+              letter-spacing: 0.8px;
+              text-transform: uppercase;
+              margin-bottom: 3px;
+            }
+            .tag-id-box {
+              font-size: 15px;
+              font-weight: 800;
+              color: #0f172a;
+              background: #f1f8e9;
+              border: 1.5px solid #86efac;
+              padding: 4px 8px;
+              border-radius: 6px;
+              font-family: monospace;
+              letter-spacing: 0.5px;
+              display: inline-block;
+              align-self: flex-start;
+              max-width: 100%;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              white-space: nowrap;
+            }
+            .tag-species-box {
+              font-size: 15px;
               font-weight: 800;
               color: #166534;
-              margin-bottom: 2px;
-              white-space: nowrap;
-              overflow: hidden;
-              text-overflow: ellipsis;
-            }
-            .tag-info-row {
-              margin-bottom: 2px;
-              white-space: nowrap;
-              overflow: hidden;
-              text-overflow: ellipsis;
-            }
-            .tag-info-label {
-              font-weight: 700;
-              color: #64748b;
-              font-size: 9px;
-              text-transform: uppercase;
-            }
-            .tag-info-val {
-              font-weight: 600;
-              color: #0f172a;
-            }
-            .tag-status-pill {
-              display: inline-block;
-              padding: 1px 6px;
-              border-radius: 4px;
-              font-size: 9px;
-              font-weight: 700;
-              margin-top: 2px;
+              line-height: 1.35;
+              word-break: break-word;
             }
             .batch-footer {
               border-top: 1px dashed #cbd5e1;
@@ -3724,7 +3683,7 @@ export default function App() {
                       • Format: <Text style={styles.batchSummaryBold}>{batchQrType === 'OFFLINE' ? 'Self-Contained Specimen Tag (Works 100% Offline)' : 'Web Certificate Link'}</Text>.
                     </Text>
                     <Text style={styles.batchSummaryHint}>
-                      ✂️ Each tag includes a dashed cutting border, Jagori Trust heading, and GPS coordinates.
+                      ✂️ Each tag includes a dashed cutting border, QR code, Tree ID, and Species name.
                     </Text>
                   </View>
                 );
