@@ -113,18 +113,38 @@ const getInitialUrlParam = (param) => {
 
 // Generates the public read-only verification URL encoded in the QR
 const buildPublicTreeUrl = (id) => {
-  // If a custom domain is configured in .env (e.g. https://jagori-trees.org)
+  // 1. If running on the web in production (deployed on Vercel or custom domain), use live origin
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location && window.location.origin) {
+    const host = window.location.hostname;
+    const isLocalhost = host.includes('localhost') || host.includes('127.0.0.1');
+    const isPrivateIp = host.startsWith('192.168.') || host.startsWith('10.') || host.startsWith('172.');
+    if (!isLocalhost && !isPrivateIp) {
+      return `${window.location.origin}/?treeId=${encodeURIComponent(id)}&view=public`;
+    }
+  }
+
+  // 2. If a production URL is configured in .env (not 192.168.x.x or localhost)
   const configuredBase = process.env.EXPO_PUBLIC_QR_BASE_URL;
+  if (
+    configuredBase &&
+    configuredBase.startsWith('http') &&
+    !configuredBase.includes('192.168.0.100') &&
+    !configuredBase.includes('localhost')
+  ) {
+    return `${configuredBase.replace(/\/+$/, '')}/?treeId=${encodeURIComponent(id)}&view=public`;
+  }
+
+  // 3. For local development / Wi-Fi testing, use configured base (e.g. http://192.168.0.100:8081)
   if (configuredBase && configuredBase.startsWith('http')) {
     return `${configuredBase.replace(/\/+$/, '')}/?treeId=${encodeURIComponent(id)}&view=public`;
   }
 
-  // If in web browser, use current host
+  // 4. Web browser fallback
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location && window.location.origin) {
     return `${window.location.origin}/?treeId=${encodeURIComponent(id)}&view=public`;
   }
 
-// Fallback to local Wi-Fi IP so mobile cameras can scan and open it on the local network
+  // Fallback to local Wi-Fi IP so mobile cameras can scan and open it on the local network
   return `http://192.168.0.100:8081/?treeId=${encodeURIComponent(id)}&view=public`;
 };
 
@@ -1024,10 +1044,20 @@ export default function App() {
 
   // Search Tree for Update (Local + Cloud)
   const handleSearchTree = async (idToSearch) => {
-    const query = (idToSearch || searchTreeId).trim();
+    let query = (idToSearch || searchTreeId).trim();
     if (!query) {
       Alert.alert('Search Required', 'Please enter a term (Tree ID, species, village, donor, date, etc.) to search.');
       return;
+    }
+
+    // Auto-extract Tree ID if input is a scanned QR URL
+    if (query.includes('treeId=')) {
+      try {
+        const queryPart = query.includes('?') ? query.substring(query.indexOf('?')) : query;
+        const params = new URLSearchParams(queryPart);
+        const extracted = params.get('treeId');
+        if (extracted) query = extracted.trim();
+      } catch {}
     }
 
     try {
