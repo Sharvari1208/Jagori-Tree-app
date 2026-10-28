@@ -26,6 +26,8 @@ import QRCode from 'react-native-qrcode-svg';
 import * as XLSX from 'xlsx';
 import { supabase, isSupabaseConfigured } from './supabase';
 
+const JAGORI_LOGO = require('./assets/icon.png');
+
 // Polyfill Alert.alert for React Native Web where it is otherwise a no-op
 if (Platform.OS === 'web') {
   Alert.alert = (title, message, buttons) => {
@@ -2220,7 +2222,7 @@ export default function App() {
               {/* Official Header */}
               <View style={styles.publicHeader}>
                 <View style={styles.publicLogoBadge}>
-                  <Text style={styles.publicLogoIcon}>🌿</Text>
+                  <Image source={JAGORI_LOGO} style={styles.headerLogoImage} resizeMode="contain" />
                 </View>
                 <Text style={styles.publicOrgTitle}>JAGORI FOUNDATION</Text>
                 <Text style={styles.publicRegistrySubtitle}>
@@ -2427,7 +2429,7 @@ export default function App() {
           <View style={styles.dashboardHeaderCard}>
             <View style={styles.dashboardHeaderCardInner}>
               <View style={styles.dashboardLogoBadge}>
-                <Text style={styles.dashboardLogoIcon}>🌳</Text>
+                <Image source={JAGORI_LOGO} style={styles.headerLogoImage} resizeMode="contain" />
               </View>
               <View style={styles.dashboardHeaderTextWrap}>
                 <Text style={styles.dashboardHeaderTitle}>Jagori Tree Plantation Registry</Text>
@@ -4309,15 +4311,21 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
   },
   publicLogoBadge: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#e8f5e9',
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#ffffff',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#c8e6c9',
+    borderWidth: 1.5,
+    borderColor: '#a7f3d0',
+    overflow: 'hidden',
+  },
+  headerLogoImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 26,
   },
   publicLogoIcon: {
     fontSize: 24,
@@ -4558,15 +4566,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   dashboardLogoBadge: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#e8f5e9',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#ffffff',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
-    borderWidth: 1,
-    borderColor: '#c8e6c9',
+    borderWidth: 1.5,
+    borderColor: '#a7f3d0',
+    overflow: 'hidden',
   },
   dashboardLogoIcon: {
     fontSize: 22,

@@ -26,6 +26,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
+    "build:web": "npx expo export --platform web && node -e \"const fs=require('fs'); if(fs.existsSync('public')) fs.cpSync('public', 'dist', {recursive:true});\"",
     "lint": "expo lint"
   },
   "private": true,
