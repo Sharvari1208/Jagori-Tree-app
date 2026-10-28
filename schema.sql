@@ -54,6 +54,9 @@ ON public.trees
 FOR DELETE
 USING (true);
 
+-- 5. Enable Realtime Replication for instant live updates on QR pages
+ALTER PUBLICATION supabase_realtime ADD TABLE public.trees;
+
 -- 5. Seed initial demo data (Optional)
 INSERT INTO public.trees (tree_id, species, plantation_date, latitude, longitude, donor_name, village, height, girth, last_inspection, survival_status, public_url)
 VALUES 

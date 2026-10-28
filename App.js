@@ -471,23 +471,42 @@ export default function App() {
     return () => backSubscription.remove();
   }, [currentScreen, selectedTree, initialScannedTreeId, isAdminPreview]);
 
-  // Load public tree if launched via QR code (?treeId=...)
+  // Helper to map Supabase row to standardized tree object
+  const mapSupabaseRowToTree = React.useCallback(
+    (row) => ({
+      treeId: row.tree_id,
+      species: row.species,
+      plantationDate: row.plantation_date,
+      lat: row.latitude,
+      lng: row.longitude,
+      donorName: row.donor_name || 'Jagori Community',
+      village: row.village || 'General Habitat',
+      treePhoto: row.tree_photo_url,
+      treePhotoBase64: row.tree_photo_url,
+      height: row.height || 'Not Measured',
+      girth: row.girth || 'Not Measured',
+      lastInspection: row.last_inspection || todayStr,
+      survivalStatus: row.survival_status || 'Healthy',
+      url: row.public_url || buildPublicTreeUrl(row.tree_id),
+    }),
+    [todayStr]
+  );
+
+  // Load public tree when launched via QR code (?treeId=...)
+  // Uses Stale-While-Revalidate: displays local cache instantly, then revalidates fresh from cloud
   useEffect(() => {
     if (!initialScannedTreeId) return;
 
     let isMounted = true;
     async function fetchScannedTree() {
-      // 1. Check local cache
+      // 1. Check local cache (Display immediately for instant zero-latency rendering)
       const localMatch = trees.find((t) => t.treeId.toLowerCase() === initialScannedTreeId.toLowerCase());
-      if (localMatch) {
-        if (isMounted) {
-          setPublicTree(localMatch);
-          setIsLoadingPublicTree(false);
-        }
-        return;
+      if (localMatch && isMounted) {
+        setPublicTree(localMatch);
+        setIsLoadingPublicTree(false);
       }
 
-      // 2. Fetch from Supabase
+      // 2. Always fetch fresh from Supabase Cloud to ensure latest admin edits reflect
       if (isSupabaseConfigured && supabase) {
         try {
           const { data, error } = await supabase
@@ -496,36 +515,19 @@ export default function App() {
             .eq('tree_id', initialScannedTreeId)
             .single();
 
-          if (data && !error) {
-            const loaded = {
-              treeId: data.tree_id,
-              species: data.species,
-              plantationDate: data.plantation_date,
-              lat: data.latitude,
-              lng: data.longitude,
-              donorName: data.donor_name || 'Jagori Community',
-              village: data.village || 'General Habitat',
-              treePhoto: data.tree_photo_url,
-              treePhotoBase64: data.tree_photo_url,
-              height: data.height || 'Not Measured',
-              girth: data.girth || 'Not Measured',
-              lastInspection: data.last_inspection || todayStr,
-              survivalStatus: data.survival_status || 'Healthy',
-              url: data.public_url || buildPublicTreeUrl(data.tree_id),
-            };
-            if (isMounted) {
-              setPublicTree(loaded);
-              setIsLoadingPublicTree(false);
-            }
+          if (data && !error && isMounted) {
+            const fresh = mapSupabaseRowToTree(data);
+            setPublicTree(fresh);
+            setIsLoadingPublicTree(false);
             return;
           }
         } catch (err) {
-          console.warn('Public tree fetch error:', err);
+          console.warn('Public tree initial fetch error:', err);
         }
       }
 
-      // If not found, create fallback display
-      if (isMounted) {
+      // If not in cloud and no local match, create fallback display
+      if (isMounted && !localMatch) {
         setPublicTree({
           treeId: initialScannedTreeId,
           species: 'Tree Specimen',
@@ -550,7 +552,110 @@ export default function App() {
     return () => {
       isMounted = false;
     };
-  }, [initialScannedTreeId, trees, todayStr]);
+  }, [initialScannedTreeId, todayStr, mapSupabaseRowToTree, trees]);
+
+  // Real-time live synchronization for public QR scanner view
+  // When an admin updates anything, this automatically updates the public QR page without reload
+  useEffect(() => {
+    if (currentScreen !== 'PUBLIC_VIEW') return;
+    const targetTreeId = publicTree?.treeId || initialScannedTreeId;
+    if (!targetTreeId) return;
+
+    let isActive = true;
+
+    // 1. Supabase Realtime channel subscription
+    let channel = null;
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const channelName = `realtime-tree-${targetTreeId}-${Date.now()}`;
+        channel = supabase
+          .channel(channelName)
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'trees',
+              filter: `tree_id=eq.${targetTreeId}`,
+            },
+            (payload) => {
+              if (!isActive) return;
+              if (payload.new && payload.new.tree_id) {
+                const fresh = mapSupabaseRowToTree(payload.new);
+                setPublicTree(fresh);
+              }
+            }
+          )
+          .subscribe();
+      } catch (err) {
+        console.warn('Realtime subscription warning:', err);
+      }
+    }
+
+    // 2. High-Frequency Polling Heartbeat (every 3 seconds)
+    // Guarantees auto-update even if WebSockets are blocked on cellular data
+    const syncInterval = setInterval(async () => {
+      if (!isActive || !isSupabaseConfigured || !supabase) return;
+      try {
+        const { data, error } = await supabase
+          .from('trees')
+          .select('*')
+          .eq('tree_id', targetTreeId)
+          .single();
+
+        if (data && !error && isActive) {
+          const fresh = mapSupabaseRowToTree(data);
+          setPublicTree((prev) => {
+            if (!prev) return fresh;
+            const changed =
+              prev.species !== fresh.species ||
+              prev.plantationDate !== fresh.plantationDate ||
+              prev.lat !== fresh.lat ||
+              prev.lng !== fresh.lng ||
+              prev.donorName !== fresh.donorName ||
+              prev.village !== fresh.village ||
+              prev.height !== fresh.height ||
+              prev.girth !== fresh.girth ||
+              prev.lastInspection !== fresh.lastInspection ||
+              prev.survivalStatus !== fresh.survivalStatus ||
+              prev.treePhoto !== fresh.treePhoto;
+            return changed ? fresh : prev;
+          });
+        }
+      } catch {}
+    }, 3000);
+
+    // 3. Cross-Tab Live Storage Event (instant 0ms update if testing in multiple tabs on same device)
+    let storageHandler = null;
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      storageHandler = (e) => {
+        if (!isActive) return;
+        if (e.key === CACHE_KEYS.TREES && e.newValue) {
+          try {
+            const list = JSON.parse(e.newValue);
+            if (Array.isArray(list)) {
+              const matched = list.find((t) => t.treeId.toLowerCase() === targetTreeId.toLowerCase());
+              if (matched) {
+                setPublicTree(matched);
+              }
+            }
+          } catch {}
+        }
+      };
+      window.addEventListener('storage', storageHandler);
+    }
+
+    return () => {
+      isActive = false;
+      clearInterval(syncInterval);
+      if (channel && supabase) {
+        supabase.removeChannel(channel);
+      }
+      if (storageHandler && typeof window !== 'undefined') {
+        window.removeEventListener('storage', storageHandler);
+      }
+    };
+  }, [currentScreen, publicTree?.treeId, initialScannedTreeId, todayStr, mapSupabaseRowToTree]);
 
   // Sync offline queue with Supabase Cloud
   const syncPendingTreesWithCloud = async (isManual = false) => {
@@ -2107,8 +2212,13 @@ export default function App() {
                 <Text style={styles.publicRegistrySubtitle}>
                   Tree Conservation & Verification Registry
                 </Text>
-                <View style={styles.verifiedPill}>
-                  <Text style={styles.verifiedPillText}>✓ CERTIFIED FIELD SPECIMEN</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+                  <View style={styles.verifiedPill}>
+                    <Text style={styles.verifiedPillText}>✓ CERTIFIED FIELD SPECIMEN</Text>
+                  </View>
+                  <View style={styles.liveAutoSyncPill}>
+                    <Text style={styles.liveAutoSyncPillText}>🟢 Live Cloud Auto-Sync</Text>
+                  </View>
                 </View>
               </View>
 
@@ -4217,7 +4327,6 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     paddingHorizontal: 12,
     borderRadius: 12,
-    marginTop: 10,
     borderWidth: 1,
     borderColor: '#a5d6a7',
   },
@@ -4225,6 +4334,20 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '800',
     color: '#1b5e20',
+    letterSpacing: 0.5,
+  },
+  liveAutoSyncPill: {
+    backgroundColor: '#ecfdf5',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#6ee7b7',
+  },
+  liveAutoSyncPillText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#065f46',
     letterSpacing: 0.5,
   },
   publicPhotoWrap: {
