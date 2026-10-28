@@ -136,6 +136,8 @@ const getInitialUrlParam = (param) => {
   return null;
 };
 
+const PRODUCTION_PUBLIC_DOMAIN = 'https://jagori-tree-tracker.vercel.app';
+
 // Generates the public read-only verification URL encoded in the QR
 const buildPublicTreeUrl = (id) => {
   // 1. If running on the web in production (deployed on Vercel or custom domain), use live origin
@@ -148,29 +150,41 @@ const buildPublicTreeUrl = (id) => {
     }
   }
 
-  // 2. If a production URL is configured in .env (not 192.168.x.x or localhost)
+  // 2. If a production URL is configured in .env (not 192.168.x.x, 10.x.x.x, or localhost)
   const configuredBase = process.env.EXPO_PUBLIC_QR_BASE_URL;
   if (
     configuredBase &&
     configuredBase.startsWith('http') &&
-    !configuredBase.includes('192.168.0.100') &&
-    !configuredBase.includes('localhost')
+    !configuredBase.includes('192.168.') &&
+    !configuredBase.includes('10.') &&
+    !configuredBase.includes('172.') &&
+    !configuredBase.includes('localhost') &&
+    !configuredBase.includes('127.0.0.1')
   ) {
     return `${configuredBase.replace(/\/+$/, '')}/?treeId=${encodeURIComponent(id)}&view=public`;
   }
 
-  // 3. For local development / Wi-Fi testing, use configured base (e.g. http://192.168.0.100:8081)
-  if (configuredBase && configuredBase.startsWith('http')) {
-    return `${configuredBase.replace(/\/+$/, '')}/?treeId=${encodeURIComponent(id)}&view=public`;
-  }
+  // 3. Fallback to production cloud domain (accessible globally on any cellular or Wi-Fi network)
+  return `${PRODUCTION_PUBLIC_DOMAIN}/?treeId=${encodeURIComponent(id)}&view=public`;
+};
 
-  // 4. Web browser fallback
-  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location && window.location.origin) {
-    return `${window.location.origin}/?treeId=${encodeURIComponent(id)}&view=public`;
+// Returns a guaranteed public HTTPS URL, discarding old localhost or private Wi-Fi IPs
+const getEffectiveTreeUrl = (tree) => {
+  if (!tree) return '';
+  const candidate = typeof tree === 'string' ? tree : (tree.url || tree.public_url);
+  const treeId = typeof tree === 'string' ? tree : tree.treeId;
+  if (
+    candidate &&
+    candidate.startsWith('https://') &&
+    !candidate.includes('localhost') &&
+    !candidate.includes('127.0.0.1') &&
+    !candidate.includes('192.168.') &&
+    !candidate.includes('10.') &&
+    !candidate.includes('172.')
+  ) {
+    return candidate;
   }
-
-  // Fallback to local Wi-Fi IP so mobile cameras can scan and open it on the local network
-  return `http://192.168.0.100:8081/?treeId=${encodeURIComponent(id)}&view=public`;
+  return buildPublicTreeUrl(treeId);
 };
 
 // Generates self-contained offline tree details for the QR code
@@ -487,7 +501,7 @@ export default function App() {
       girth: row.girth || 'Not Measured',
       lastInspection: row.last_inspection || todayStr,
       survivalStatus: row.survival_status || 'Healthy',
-      url: row.public_url || buildPublicTreeUrl(row.tree_id),
+      url: getEffectiveTreeUrl({ treeId: row.tree_id, url: row.public_url }),
     }),
     [todayStr]
   );
@@ -885,7 +899,7 @@ export default function App() {
             girth: t.girth || 'Not Measured',
             lastInspection: t.last_inspection || todayStr,
             survivalStatus: t.survival_status || 'Healthy',
-            url: t.public_url || buildPublicTreeUrl(t.tree_id),
+            url: getEffectiveTreeUrl({ treeId: t.tree_id, url: t.public_url }),
             qrText: buildTreeQrText({
               treeId: t.tree_id,
               species: t.species,
@@ -1475,7 +1489,7 @@ export default function App() {
       );
       await new Promise((resolve) => setTimeout(resolve, 80));
 
-      const qrData = tree.url || buildPublicTreeUrl(tree.treeId);
+      const qrData = getEffectiveTreeUrl(tree);
       // 1000x1000 px source image with zero margin so the QR code fills the image completely
       const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&ecc=M&margin=0&data=${encodeURIComponent(
         qrData
@@ -1511,7 +1525,7 @@ export default function App() {
     } catch (err) {
       console.warn('Error downloading QR image:', err);
       Alert.alert('Download Error', 'Could not save QR image. Opening browser image instead.');
-      Linking.openURL(tree.url || buildPublicTreeUrl(tree.treeId));
+      Linking.openURL(getEffectiveTreeUrl(tree));
     } finally {
       hideProgress();
     }
@@ -1531,7 +1545,7 @@ export default function App() {
       setIsBatchPrinting(true);
       await new Promise((resolve) => setTimeout(resolve, 80));
 
-      const qrData = treeToExport.url || buildPublicTreeUrl(treeToExport.treeId);
+      const qrData = getEffectiveTreeUrl(treeToExport);
 
       // High resolution 1000x1000 source image with Medium error correction & ZERO margin for maximum QR size & clarity
       const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&ecc=M&margin=0&data=${encodeURIComponent(
@@ -1892,7 +1906,7 @@ export default function App() {
           const pageNum = pageIndex + 1;
           const tagsHtml = pageTrees
             .map((tree) => {
-              const qrData = tree.url || buildPublicTreeUrl(tree.treeId);
+              const qrData = getEffectiveTreeUrl(tree);
 
               // 600x600 source resolution with zero margin so the QR modules fill the square completely
               const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&ecc=M&margin=0&data=${encodeURIComponent(
@@ -3101,13 +3115,13 @@ export default function App() {
 
               <View style={styles.qrWrapper}>
                 <QRCode
-                  value={savedTree.url || buildPublicTreeUrl(savedTree.treeId)}
+                  value={getEffectiveTreeUrl(savedTree)}
                   size={230}
                 />
                 <Text style={styles.qrTreeIdSmall}>{savedTree.treeId}</Text>
                 <Text style={styles.qrSpeciesBelow}>{savedTree.species}</Text>
                 <Text style={styles.qrUrlText}>
-                  {savedTree.url || buildPublicTreeUrl(savedTree.treeId)}
+                  {getEffectiveTreeUrl(savedTree)}
                 </Text>
               </View>
 
@@ -3406,7 +3420,7 @@ export default function App() {
                   </View>
                 </View>
                 <View style={styles.miniQrBadge}>
-                  <QRCode value={selectedTree.url || buildPublicTreeUrl(selectedTree.treeId)} size={84} />
+                  <QRCode value={getEffectiveTreeUrl(selectedTree)} size={84} />
                 </View>
               </View>
 
