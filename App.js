@@ -136,7 +136,7 @@ const getInitialUrlParam = (param) => {
   return null;
 };
 
-const PRODUCTION_PUBLIC_DOMAIN = 'https://jagori-tree-tracker.vercel.app';
+const PRODUCTION_PUBLIC_DOMAIN = 'https://jagori-tree-app.vercel.app';
 
 // Generates the public read-only verification URL encoded in the QR
 const buildPublicTreeUrl = (id) => {
