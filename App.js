@@ -26,6 +26,31 @@ import QRCode from 'react-native-qrcode-svg';
 import * as XLSX from 'xlsx';
 import { supabase, isSupabaseConfigured } from './supabase';
 
+// Polyfill Alert.alert for React Native Web where it is otherwise a no-op
+if (Platform.OS === 'web') {
+  Alert.alert = (title, message, buttons) => {
+    const text = [title, message].filter(Boolean).join('\n\n');
+    if (buttons && buttons.length > 1) {
+      const confirmAction = buttons.find((b) => b.style !== 'cancel') || buttons[buttons.length - 1];
+      const cancelAction = buttons.find((b) => b.style === 'cancel');
+      if (typeof window !== 'undefined' && window.confirm) {
+        if (window.confirm(text)) {
+          if (confirmAction && confirmAction.onPress) confirmAction.onPress();
+        } else {
+          if (cancelAction && cancelAction.onPress) cancelAction.onPress();
+        }
+        return;
+      }
+    }
+    if (typeof window !== 'undefined' && window.alert) {
+      window.alert(text);
+    }
+    if (buttons && buttons[0] && buttons[0].onPress) {
+      buttons[0].onPress();
+    }
+  };
+}
+
 // Local Storage Keys for Offline Resilience
 const CACHE_KEYS = {
   TREES: '@jagori_trees_cache_v2',
@@ -389,10 +414,15 @@ export default function App() {
   const [updatePhoto, setUpdatePhoto] = useState(null);
   const [updatePhotoBase64, setUpdatePhotoBase64] = useState(null);
   const [updateSpecies, setUpdateSpecies] = useState('');
+  const [updatePlantationDate, setUpdatePlantationDate] = useState(todayStr);
+  const [updateLat, setUpdateLat] = useState('');
+  const [updateLng, setUpdateLng] = useState('');
   const [updateDonorName, setUpdateDonorName] = useState('');
   const [updateVillage, setUpdateVillage] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [isUpdatingLocation, setIsUpdatingLocation] = useState(false);
+  const [updateSuccessModal, setUpdateSuccessModal] = useState({ visible: false, tree: null, isCloud: false });
 
   // Monitor keyboard display so scroll view dynamically expands to prevent keypad obstruction
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -546,7 +576,7 @@ export default function App() {
             {
               tree_id: item.treeId,
               species: item.species,
-              plantation_date: item.plantationDate,
+              plantation_date: item.plantationDate ? item.plantationDate.trim() : null,
               latitude: item.lat,
               longitude: item.lng,
               donor_name: item.donorName,
@@ -554,7 +584,7 @@ export default function App() {
               tree_photo_url: item.treePhotoBase64 || item.treePhoto,
               height: item.height,
               girth: item.girth,
-              last_inspection: item.lastInspection,
+              last_inspection: item.lastInspection && item.lastInspection.trim() ? item.lastInspection.trim() : null,
               survival_status: item.survivalStatus,
               public_url: item.url,
               updated_at: new Date().toISOString(),
@@ -969,7 +999,7 @@ export default function App() {
               {
                 tree_id: newTree.treeId,
                 species: newTree.species,
-                plantation_date: newTree.plantationDate,
+                plantation_date: newTree.plantationDate ? newTree.plantationDate.trim() : null,
                 latitude: newTree.lat,
                 longitude: newTree.lng,
                 donor_name: newTree.donorName,
@@ -977,7 +1007,7 @@ export default function App() {
                 tree_photo_url: newTree.treePhotoBase64 || newTree.treePhoto,
                 height: newTree.height,
                 girth: newTree.girth,
-                last_inspection: newTree.lastInspection,
+                last_inspection: newTree.lastInspection && newTree.lastInspection.trim() ? newTree.lastInspection.trim() : null,
                 survival_status: newTree.survivalStatus,
                 public_url: newTree.url,
               },
@@ -1031,15 +1061,39 @@ export default function App() {
 
   const applySelectedTree = (tree) => {
     setSelectedTree(tree);
-    setUpdateSpecies(tree.species);
-    setUpdateDonorName(tree.donorName);
-    setUpdateVillage(tree.village);
-    setUpdateHeight(tree.height);
-    setUpdateGirth(tree.girth);
-    setUpdateLastInspection(todayStr);
-    setUpdateSurvivalStatus(tree.survivalStatus);
-    setUpdatePhoto(tree.treePhoto);
-    setUpdatePhotoBase64(tree.treePhotoBase64);
+    setUpdateSpecies(tree.species || '');
+    setUpdatePlantationDate(tree.plantationDate || todayStr);
+    setUpdateLat(tree.lat || '');
+    setUpdateLng(tree.lng || '');
+    setUpdateDonorName(tree.donorName || '');
+    setUpdateVillage(tree.village || '');
+    setUpdateHeight(tree.height || '');
+    setUpdateGirth(tree.girth || '');
+    setUpdateLastInspection(tree.lastInspection || todayStr);
+    setUpdateSurvivalStatus(tree.survivalStatus || 'Healthy');
+    setUpdatePhoto(tree.treePhoto || null);
+    setUpdatePhotoBase64(tree.treePhotoBase64 || null);
+  };
+
+  const fetchUpdateLocation = async () => {
+    try {
+      setIsUpdatingLocation(true);
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'Location permission is required to fetch current GPS coordinates.');
+        return;
+      }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      if (loc && loc.coords) {
+        setUpdateLat(loc.coords.latitude.toFixed(6));
+        setUpdateLng(loc.coords.longitude.toFixed(6));
+      }
+    } catch (err) {
+      console.warn('GPS update error:', err);
+      Alert.alert('Location Error', 'Unable to retrieve GPS coordinates.');
+    } finally {
+      setIsUpdatingLocation(false);
+    }
   };
 
   // Search Tree for Update (Local + Cloud)
@@ -1099,11 +1153,14 @@ export default function App() {
       if (isSupabaseConfigured && supabase) {
         setIsSearching(true);
         try {
-          const { data, error } = await supabase
-            .from('trees')
-            .select('*')
-            .or(`tree_id.ilike.%${query}%,species.ilike.%${query}%,village.ilike.%${query}%,donor_name.ilike.%${query}%,survival_status.ilike.%${query}%,plantation_date.ilike.%${query}%`)
-            .limit(1);
+          const isExactDate = /^\d{4}-\d{2}-\d{2}$/.test(query);
+          let queryBuilder = supabase.from('trees').select('*');
+          if (isExactDate) {
+            queryBuilder = queryBuilder.or(`tree_id.ilike.%${query}%,plantation_date.eq.${query}`);
+          } else {
+            queryBuilder = queryBuilder.or(`tree_id.ilike.%${query}%,species.ilike.%${query}%,village.ilike.%${query}%,donor_name.ilike.%${query}%,survival_status.ilike.%${query}%`);
+          }
+          const { data, error } = await queryBuilder.limit(1);
 
           if (data && data.length > 0 && !error) {
             const row = data[0];
@@ -1152,12 +1209,16 @@ export default function App() {
       Alert.alert('Validation Error', 'Last inspection date must be in YYYY-MM-DD format (e.g. 2026-10-27).');
       return;
     }
+    if (updatePlantationDate.trim() && !dateRegex.test(updatePlantationDate.trim())) {
+      Alert.alert('Validation Error', 'Plantation date must be in YYYY-MM-DD format (e.g. 2026-10-27).');
+      return;
+    }
 
     try {
       setIsUpdating(true);
       showProgress(
         'Saving Tree Updates...',
-        `Updating growth measurements and survival status for Tree ${selectedTree.treeId}...`,
+        `Updating growth measurements and records for Tree ${selectedTree.treeId}...`,
         '💾 Updating'
       );
       await new Promise((resolve) => setTimeout(resolve, 80));
@@ -1165,6 +1226,9 @@ export default function App() {
       const updatedTree = {
         ...selectedTree,
         species: updateSpecies.trim() || selectedTree.species,
+        plantationDate: updatePlantationDate.trim() || selectedTree.plantationDate,
+        lat: updateLat.trim() || selectedTree.lat,
+        lng: updateLng.trim() || selectedTree.lng,
         donorName: updateDonorName.trim() || selectedTree.donorName,
         village: updateVillage.trim() || selectedTree.village,
         height: updateHeight.trim() || selectedTree.height,
@@ -1192,12 +1256,15 @@ export default function App() {
             .from('trees')
             .update({
               species: updatedTree.species,
+              plantation_date: updatedTree.plantationDate ? updatedTree.plantationDate.trim() : null,
+              latitude: updatedTree.lat,
+              longitude: updatedTree.lng,
               donor_name: updatedTree.donorName,
               village: updatedTree.village,
               tree_photo_url: updatedTree.treePhotoBase64 || updatedTree.treePhoto,
               height: updatedTree.height,
               girth: updatedTree.girth,
-              last_inspection: updatedTree.lastInspection,
+              last_inspection: updatedTree.lastInspection && updatedTree.lastInspection.trim() ? updatedTree.lastInspection.trim() : null,
               survival_status: updatedTree.survivalStatus,
               public_url: updatedTree.url,
               updated_at: new Date().toISOString(),
@@ -1219,16 +1286,13 @@ export default function App() {
         const remainingCount = await addToSyncQueue(updatedTree);
         setPendingSyncCount(remainingCount);
         setCloudSyncStatus('PENDING');
-        Alert.alert(
-          'Updated Locally (Offline Mode)',
-          `Tree ${updatedTree.treeId} updates have been saved to this device!\n\n📶 These changes will sync to the database as soon as you have internet.`
-        );
-      } else {
-        Alert.alert(
-          'Tree Updated',
-          `Tree ${updatedTree.treeId} information has been successfully updated in the database!\n\n✓ The existing physical QR code on this tree remains active and will now show these latest records.`
-        );
       }
+
+      setUpdateSuccessModal({
+        visible: true,
+        tree: updatedTree,
+        isCloud: isCloudSuccess,
+      });
     } finally {
       setIsUpdating(false);
       hideProgress();
@@ -2005,20 +2069,34 @@ export default function App() {
       {/* ============================================================== */}
       {currentScreen === 'PUBLIC_VIEW' && (
         <View style={styles.publicWrapper}>
-          {/* Admin Preview Return Banner */}
-          {isAdminPreview && (
-            <View style={styles.previewModeBanner}>
-              <Text style={styles.previewModeText}>
-                ADMIN PREVIEW • Read-Only Visitor View
+          {/* Universal Top Action Banner for Scanners & Staff */}
+          <View style={styles.publicTopActionBar}>
+            <TouchableOpacity
+              style={styles.publicReturnHomeBtn}
+              onPress={() => {
+                setIsAdminPreview(false);
+                setCurrentScreen('DASHBOARD');
+              }}
+            >
+              <Text style={styles.publicReturnHomeBtnText}>
+                {isAdminPreview ? '← Return to Dashboard' : '🌳 Registry Dashboard'}
               </Text>
+            </TouchableOpacity>
+
+            {publicTree && (
               <TouchableOpacity
-                style={styles.previewReturnBtn}
-                onPress={() => setCurrentScreen('DASHBOARD')}
+                style={styles.publicDirectEditBtn}
+                onPress={() => {
+                  applySelectedTree(publicTree);
+                  setSearchTreeId(publicTree.treeId);
+                  setIsAdminPreview(false);
+                  setCurrentScreen('UPDATE_TREE');
+                }}
               >
-                <Text style={styles.previewReturnBtnText}>← Return to Dashboard</Text>
+                <Text style={styles.publicDirectEditBtnText}>✏️ Edit This Tree</Text>
               </TouchableOpacity>
-            </View>
-          )}
+            )}
+          </View>
 
           {isLoadingPublicTree ? (
             <View style={styles.publicLoadingBox}>
@@ -2204,6 +2282,21 @@ export default function App() {
                   This specimen is actively monitored and protected under Jagori Charitable Trust.
                 </Text>
               </View>
+
+              {/* Staff / Caretaker Direct Edit Button */}
+              <TouchableOpacity
+                style={styles.publicFooterEditBtn}
+                onPress={() => {
+                  applySelectedTree(publicTree);
+                  setSearchTreeId(publicTree.treeId);
+                  setIsAdminPreview(false);
+                  setCurrentScreen('UPDATE_TREE');
+                }}
+              >
+                <Text style={styles.publicFooterEditBtnText}>
+                  ✏️ Staff / Caretaker: Update Tree Growth Record ➔
+                </Text>
+              </TouchableOpacity>
 
               {/* Institutional Footer */}
               <View style={styles.publicFooter}>
@@ -3267,104 +3360,136 @@ export default function App() {
                 </Text>
               </TouchableOpacity>
 
-              <Text style={styles.summarySubheading}>Tree Information (In Sequence):</Text>
+              <View style={{ marginVertical: 12 }}>
+                <Text style={styles.summarySubheading}>Update Official Record (11 Categories):</Text>
+              </View>
 
               {/* 1. Tree ID */}
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>1. Tree ID:</Text>
-                <Text style={[styles.detailValue, styles.detailBold]}>
-                  {selectedTree.treeId}
-                </Text>
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionNum}>1</Text>
+                <Text style={styles.label}>Tree ID (Permanent Certified Specimen Tag)</Text>
+              </View>
+              <View style={styles.idRow}>
+                <TextInput
+                  style={[styles.input, styles.idInput, { backgroundColor: '#f0fdf4', color: '#166534', fontWeight: 'bold' }]}
+                  value={selectedTree.treeId}
+                  editable={false}
+                />
               </View>
 
               {/* 2. Species */}
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>2. Species:</Text>
-                <TextInput
-                  style={[styles.inlineInput, { width: 140 }]}
-                  value={updateSpecies}
-                  onChangeText={setUpdateSpecies}
-                />
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionNum}>2</Text>
+                <Text style={styles.label}>Species / Tree Name</Text>
               </View>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. Neem, Peepal, Banyan, Teak"
+                value={updateSpecies}
+                onChangeText={setUpdateSpecies}
+              />
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.speciesChipsContainer}
+                keyboardShouldPersistTaps="always"
+              >
+                {COMMON_SPECIES.map((s) => (
+                  <TouchableOpacity
+                    key={s}
+                    style={[styles.chip, updateSpecies === s && styles.chipActive]}
+                    onPress={() => setUpdateSpecies(s)}
+                  >
+                    <Text
+                      style={[
+                        styles.chipText,
+                        updateSpecies === s && styles.chipTextActive,
+                      ]}
+                    >
+                      {s}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
 
               {/* 3. Plantation Date */}
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>3. Plantation Date:</Text>
-                <Text style={styles.detailValue}>{selectedTree.plantationDate}</Text>
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionNum}>3</Text>
+                <Text style={styles.label}>Plantation Date (YYYY-MM-DD)</Text>
               </View>
+              <TextInput
+                style={styles.input}
+                placeholder="YYYY-MM-DD"
+                value={updatePlantationDate}
+                onChangeText={setUpdatePlantationDate}
+              />
 
               {/* 4. GPS Location */}
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>4. GPS Location:</Text>
-                <Text style={styles.detailValue}>
-                  {selectedTree.lat}, {selectedTree.lng}
-                </Text>
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionNum}>4</Text>
+                <Text style={styles.label}>GPS Location Coordinates</Text>
               </View>
+              <View style={styles.coordsRow}>
+                <TextInput
+                  style={[styles.input, styles.coordInput]}
+                  placeholder="Latitude (e.g. 32.219042)"
+                  value={updateLat}
+                  onChangeText={setUpdateLat}
+                />
+                <TextInput
+                  style={[styles.input, styles.coordInput]}
+                  placeholder="Longitude (e.g. 76.323404)"
+                  value={updateLng}
+                  onChangeText={setUpdateLng}
+                />
+              </View>
+              <TouchableOpacity
+                style={styles.locationBtn}
+                onPress={fetchUpdateLocation}
+                disabled={isUpdatingLocation}
+              >
+                {isUpdatingLocation ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.locationBtnText}>📍 Refresh Current GPS</Text>
+                )}
+              </TouchableOpacity>
 
               {/* 5. Donor Name */}
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>5. Donor Name:</Text>
-                <TextInput
-                  style={[styles.inlineInput, { width: 160 }]}
-                  value={updateDonorName}
-                  onChangeText={setUpdateDonorName}
-                />
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionNum}>5</Text>
+                <Text style={styles.label}>Donor / Sponsor / Caretaker Name</Text>
               </View>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. Sunita Sharma / Jagori Community"
+                value={updateDonorName}
+                onChangeText={setUpdateDonorName}
+              />
 
               {/* 6. Village */}
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>6. Village:</Text>
-                <TextInput
-                  style={[styles.inlineInput, { width: 140 }]}
-                  value={updateVillage}
-                  onChangeText={setUpdateVillage}
-                />
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionNum}>6</Text>
+                <Text style={styles.label}>Village / Conservation Site</Text>
               </View>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. Dharamsala, Rait, Kangra"
+                value={updateVillage}
+                onChangeText={setUpdateVillage}
+              />
 
               {/* 7. Tree Photo */}
-              <View style={{ marginVertical: 10 }}>
-                <Text style={styles.detailLabel}>7. Tree Photo:</Text>
-                {updatePhoto ? (
-                  <View style={{ alignItems: 'center', marginTop: 8 }}>
-                    <Image source={{ uri: updatePhoto }} style={styles.updatePhotoPreview} />
-                    <View style={styles.photoActionsRow}>
-                      <TouchableOpacity
-                        style={styles.photoChangeBtn}
-                        onPress={() =>
-                          pickPhotoFromGallery((uri, b64) => {
-                            setUpdatePhoto(uri);
-                            setUpdatePhotoBase64(b64);
-                          })
-                        }
-                      >
-                        <Text style={styles.photoBtnSmallText}>Change Photo</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.photoRemoveBtn}
-                        onPress={() => {
-                          setUpdatePhoto(null);
-                          setUpdatePhotoBase64(null);
-                        }}
-                      >
-                        <Text style={styles.photoBtnSmallText}>Remove</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                ) : (
-                  <View style={[styles.photoButtonsRow, { marginTop: 6 }]}>
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionNum}>7</Text>
+                <Text style={styles.label}>Tree Field Photograph</Text>
+              </View>
+              {updatePhoto ? (
+                <View style={{ alignItems: 'center', marginTop: 8 }}>
+                  <Image source={{ uri: updatePhoto }} style={styles.updatePhotoPreview} />
+                  <View style={styles.photoActionsRow}>
                     <TouchableOpacity
-                      style={styles.photoBtn}
-                      onPress={() =>
-                        pickPhotoFromCamera((uri, b64) => {
-                          setUpdatePhoto(uri);
-                          setUpdatePhotoBase64(b64);
-                        })
-                      }
-                    >
-                      <Text style={styles.photoBtnText}>📷 Retake Photo</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.photoBtn}
+                      style={styles.photoChangeBtn}
                       onPress={() =>
                         pickPhotoFromGallery((uri, b64) => {
                           setUpdatePhoto(uri);
@@ -3372,77 +3497,121 @@ export default function App() {
                         })
                       }
                     >
-                      <Text style={styles.photoBtnText}>🖼️ Choose Photo</Text>
+                      <Text style={styles.photoBtnSmallText}>Change Photo</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.photoRemoveBtn}
+                      onPress={() => {
+                        setUpdatePhoto(null);
+                        setUpdatePhotoBase64(null);
+                      }}
+                    >
+                      <Text style={styles.photoBtnSmallText}>Remove</Text>
                     </TouchableOpacity>
                   </View>
-                )}
-              </View>
+                </View>
+              ) : (
+                <View style={[styles.photoButtonsRow, { marginTop: 6 }]}>
+                  <TouchableOpacity
+                    style={styles.photoBtn}
+                    onPress={() =>
+                      pickPhotoFromCamera((uri, b64) => {
+                        setUpdatePhoto(uri);
+                        setUpdatePhotoBase64(b64);
+                      })
+                    }
+                  >
+                    <Text style={styles.photoBtnText}>📷 Retake Photo</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.photoBtn}
+                    onPress={() =>
+                      pickPhotoFromGallery((uri, b64) => {
+                        setUpdatePhoto(uri);
+                        setUpdatePhotoBase64(b64);
+                      })
+                    }
+                  >
+                    <Text style={styles.photoBtnText}>🖼️ Choose Photo</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
 
               {/* 8. Height */}
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>8. Height (Updated):</Text>
-                <TextInput
-                  style={[styles.inlineInput, { width: 120 }]}
-                  placeholder="e.g. 5.6 ft"
-                  value={updateHeight}
-                  onChangeText={setUpdateHeight}
-                />
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionNum}>8</Text>
+                <Text style={styles.label}>Height (Updated Growth)</Text>
               </View>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. 5.6 ft"
+                value={updateHeight}
+                onChangeText={setUpdateHeight}
+              />
 
               {/* 9. Girth */}
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>9. Girth (Updated):</Text>
-                <TextInput
-                  style={[styles.inlineInput, { width: 120 }]}
-                  placeholder="e.g. 18 cm"
-                  value={updateGirth}
-                  onChangeText={setUpdateGirth}
-                />
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionNum}>9</Text>
+                <Text style={styles.label}>Girth (Trunk Circumference)</Text>
               </View>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. 18 cm"
+                value={updateGirth}
+                onChangeText={setUpdateGirth}
+              />
 
               {/* 10. Last Inspection */}
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>10. Last Inspection:</Text>
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionNum}>10</Text>
+                <Text style={styles.label}>Last Inspection Date (YYYY-MM-DD)</Text>
+              </View>
+              <View style={styles.idRow}>
                 <TextInput
-                  style={[styles.inlineInput, { width: 130 }]}
+                  style={[styles.input, { flex: 1 }]}
                   placeholder="YYYY-MM-DD"
                   value={updateLastInspection}
                   onChangeText={setUpdateLastInspection}
                 />
+                <TouchableOpacity
+                  style={[styles.regenerateBtn, { backgroundColor: '#e8f5e9', borderColor: '#81c784' }]}
+                  onPress={() => setUpdateLastInspection(todayStr)}
+                >
+                  <Text style={[styles.regenerateBtnText, { color: '#2e7d32' }]}>Today</Text>
+                </TouchableOpacity>
               </View>
 
               {/* 11. Survival Status */}
-              <View style={{ marginVertical: 10 }}>
-                <Text style={[styles.detailLabel, { marginBottom: 8 }]}>
-                  11. Survival Status:
-                </Text>
-                <View style={styles.statusOptionsContainer}>
-                  {SURVIVAL_STATUS_OPTIONS.map((item) => {
-                    const isSelected = updateSurvivalStatus === item.label;
-                    return (
-                      <TouchableOpacity
-                        key={item.label}
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionNum}>11</Text>
+                <Text style={styles.label}>Survival Status</Text>
+              </View>
+              <View style={styles.statusOptionsContainer}>
+                {SURVIVAL_STATUS_OPTIONS.map((item) => {
+                  const isSelected = updateSurvivalStatus === item.label;
+                  return (
+                    <TouchableOpacity
+                      key={item.label}
+                      style={[
+                        styles.statusOptionBtn,
+                        { borderColor: item.color },
+                        isSelected && { backgroundColor: item.bg, borderWidth: 2 },
+                      ]}
+                      onPress={() => setUpdateSurvivalStatus(item.label)}
+                    >
+                      <Text style={styles.statusOptionIcon}>{item.icon}</Text>
+                      <Text
                         style={[
-                          styles.statusOptionBtn,
-                          { borderColor: item.color },
-                          isSelected && { backgroundColor: item.bg, borderWidth: 2 },
+                          styles.statusOptionText,
+                          { color: item.color },
+                          isSelected && { fontWeight: 'bold' },
                         ]}
-                        onPress={() => setUpdateSurvivalStatus(item.label)}
                       >
-                        <Text style={styles.statusOptionIcon}>{item.icon}</Text>
-                        <Text
-                          style={[
-                            styles.statusOptionText,
-                            { color: item.color },
-                            isSelected && { fontWeight: 'bold' },
-                          ]}
-                        >
-                          {item.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
+                        {item.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
 
               {/* Save Updates Button */}
@@ -3780,6 +3949,82 @@ export default function App() {
           </View>
         </View>
       </Modal>
+
+      {/* ============================================================== */}
+      {/* TREE UPDATE SUCCESS CONFIRMATION MODAL */}
+      {/* ============================================================== */}
+      <Modal
+        visible={updateSuccessModal.visible}
+        transparent={true}
+        animationType="fade"
+        statusBarTranslucent={true}
+      >
+        <View style={styles.sheetProgressOverlay}>
+          <View style={[styles.sheetProgressCard, { maxWidth: 440, padding: 24 }]}>
+            <View style={[styles.sheetProgressSpinnerWrap, { backgroundColor: '#dcfce7', borderWidth: 2, borderColor: '#86efac' }]}>
+              <Text style={{ fontSize: 28 }}>✅</Text>
+            </View>
+            <Text style={[styles.sheetProgressTitle, { color: '#14532d', fontSize: 18, marginTop: 12 }]}>
+              Tree Record Updated!
+            </Text>
+            <Text style={[styles.sheetProgressMessage, { color: '#374151', fontSize: 13, marginTop: 6 }]}>
+              Tree <Text style={{ fontWeight: '800', color: '#166534' }}>{updateSuccessModal.tree?.treeId}</Text> ({updateSuccessModal.tree?.species}) has been successfully updated {updateSuccessModal.isCloud ? 'in the cloud database & local storage' : 'locally (offline queue synced automatically)'}.
+            </Text>
+
+            {updateSuccessModal.tree && (
+              <View style={{ backgroundColor: '#f0fdf4', borderWidth: 1, borderColor: '#bbf7d0', borderRadius: 10, padding: 12, marginVertical: 14, width: '100%' }}>
+                <Text style={{ fontSize: 12, color: '#166534', fontWeight: '700', marginBottom: 4 }}>
+                  🌿 {updateSuccessModal.tree.species} • 📍 {updateSuccessModal.tree.village}
+                </Text>
+                <Text style={{ fontSize: 11, color: '#4b5563', lineHeight: 16 }}>
+                  Status: <Text style={{ fontWeight: '700', color: '#15803d' }}>{updateSuccessModal.tree.survivalStatus}</Text> • Planted: {updateSuccessModal.tree.plantationDate}
+                  {'\n'}Height: {updateSuccessModal.tree.height || 'N/A'} • Girth: {updateSuccessModal.tree.girth || 'N/A'}
+                  {'\n'}Last Inspection: {updateSuccessModal.tree.lastInspection}
+                </Text>
+                <Text style={{ fontSize: 11, color: '#15803d', fontStyle: 'italic', marginTop: 6 }}>
+                  ✓ The existing physical QR tag remains active and now shows these latest records.
+                </Text>
+              </View>
+            )}
+
+            <View style={{ flexDirection: 'row', gap: 10, width: '100%', marginTop: 4 }}>
+              <TouchableOpacity
+                style={{ flex: 1, backgroundColor: '#f3f4f6', borderWidth: 1, borderColor: '#d1d5db', paddingVertical: 10, borderRadius: 8, alignItems: 'center' }}
+                onPress={() => {
+                  setUpdateSuccessModal({ visible: false, tree: null, isCloud: false });
+                  setCurrentScreen('DASHBOARD');
+                }}
+              >
+                <Text style={{ color: '#374151', fontWeight: '700', fontSize: 13 }}>← Dashboard</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{ flex: 1.2, backgroundColor: '#15803d', paddingVertical: 10, borderRadius: 8, alignItems: 'center' }}
+                onPress={() => {
+                  const saved = updateSuccessModal.tree;
+                  setUpdateSuccessModal({ visible: false, tree: null, isCloud: false });
+                  if (saved) {
+                    setPublicTree(saved);
+                    setIsAdminPreview(true);
+                    setCurrentScreen('PUBLIC_VIEW');
+                  }
+                }}
+              >
+                <Text style={{ color: '#ffffff', fontWeight: '700', fontSize: 13 }}>👁️ View Public Page</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={{ marginTop: 10, paddingVertical: 4 }}
+              onPress={() => setUpdateSuccessModal({ visible: false, tree: null, isCloud: false })}
+            >
+              <Text style={{ color: '#6b7280', fontSize: 12, textDecorationLine: 'underline' }}>
+                Keep editing this tree
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -3841,6 +4086,63 @@ const styles = StyleSheet.create({
     width: '100%',
     alignSelf: 'center',
     paddingBottom: 40,
+  },
+  publicTopActionBar: {
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#c8e6c9',
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    shadowColor: '#1b5e20',
+    shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  publicReturnHomeBtn: {
+    backgroundColor: '#f1f8e9',
+    borderWidth: 1,
+    borderColor: '#a5d6a7',
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  publicReturnHomeBtnText: {
+    color: '#1b5e20',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  publicDirectEditBtn: {
+    backgroundColor: '#15803d',
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+  },
+  publicDirectEditBtnText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  publicFooterEditBtn: {
+    backgroundColor: '#f0fdf4',
+    borderWidth: 1.5,
+    borderColor: '#86efac',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    marginTop: 18,
+    marginBottom: 10,
+  },
+  publicFooterEditBtnText: {
+    color: '#15803d',
+    fontSize: 13,
+    fontWeight: '800',
   },
   previewModeBanner: {
     backgroundColor: '#fef3c7',

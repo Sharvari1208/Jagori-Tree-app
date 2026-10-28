@@ -44,3 +44,4 @@ yarn-error.*
 # local stray files
 result.py
 Hospital Management
+.vercel
