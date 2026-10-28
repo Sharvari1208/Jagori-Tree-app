@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "tree-tracker",
-    "slug": "tree-tracker",
+    "name": "Jagori Tree Tracker",
+    "slug": "jagori-tree-tracker",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -19,7 +19,13 @@
       }
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "name": "Jagori Tree Tracker",
+      "shortName": "Jagori Trees",
+      "description": "Official Tree Conservation & Verification Registry by Jagori Charitable Trust",
+      "themeColor": "#15803d",
+      "backgroundColor": "#f9fafb",
+      "display": "standalone"
     },
     "plugins": [
       "expo-sharing",
