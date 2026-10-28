@@ -447,6 +447,10 @@ export default function App() {
   // Handle hardware & mobile back button (Android and gesture back)
   useEffect(() => {
     const onBackPress = () => {
+      // If a public visitor scanned the QR code, do not let back press open the internal Dashboard
+      if (initialScannedTreeId && !isAdminPreview && currentScreen === 'PUBLIC_VIEW') {
+        return false;
+      }
       if (currentScreen === 'UPDATE_TREE' && selectedTree) {
         setSelectedTree(null);
         setSearchTreeId('');
@@ -465,7 +469,7 @@ export default function App() {
     );
 
     return () => backSubscription.remove();
-  }, [currentScreen, selectedTree]);
+  }, [currentScreen, selectedTree, initialScannedTreeId, isAdminPreview]);
 
   // Load public tree if launched via QR code (?treeId=...)
   useEffect(() => {
@@ -2069,34 +2073,23 @@ export default function App() {
       {/* ============================================================== */}
       {currentScreen === 'PUBLIC_VIEW' && (
         <View style={styles.publicWrapper}>
-          {/* Universal Top Action Banner for Scanners & Staff */}
-          <View style={styles.publicTopActionBar}>
-            <TouchableOpacity
-              style={styles.publicReturnHomeBtn}
-              onPress={() => {
-                setIsAdminPreview(false);
-                setCurrentScreen('DASHBOARD');
-              }}
-            >
-              <Text style={styles.publicReturnHomeBtnText}>
-                {isAdminPreview ? '← Return to Dashboard' : '🌳 Registry Dashboard'}
+          {/* Admin Preview Return Banner (ONLY visible when an admin inside the app clicks Preview) */}
+          {isAdminPreview && (
+            <View style={styles.previewModeBanner}>
+              <Text style={styles.previewModeText}>
+                👁️ Admin Preview: This is what public visitors see when scanning the QR code
               </Text>
-            </TouchableOpacity>
-
-            {publicTree && (
               <TouchableOpacity
-                style={styles.publicDirectEditBtn}
+                style={styles.previewReturnBtn}
                 onPress={() => {
-                  applySelectedTree(publicTree);
-                  setSearchTreeId(publicTree.treeId);
                   setIsAdminPreview(false);
-                  setCurrentScreen('UPDATE_TREE');
+                  setCurrentScreen('DASHBOARD');
                 }}
               >
-                <Text style={styles.publicDirectEditBtnText}>✏️ Edit This Tree</Text>
+                <Text style={styles.previewReturnBtnText}>✕ Close Preview</Text>
               </TouchableOpacity>
-            )}
-          </View>
+            </View>
+          )}
 
           {isLoadingPublicTree ? (
             <View style={styles.publicLoadingBox}>
@@ -2282,21 +2275,6 @@ export default function App() {
                   This specimen is actively monitored and protected under Jagori Charitable Trust.
                 </Text>
               </View>
-
-              {/* Staff / Caretaker Direct Edit Button */}
-              <TouchableOpacity
-                style={styles.publicFooterEditBtn}
-                onPress={() => {
-                  applySelectedTree(publicTree);
-                  setSearchTreeId(publicTree.treeId);
-                  setIsAdminPreview(false);
-                  setCurrentScreen('UPDATE_TREE');
-                }}
-              >
-                <Text style={styles.publicFooterEditBtnText}>
-                  ✏️ Staff / Caretaker: Update Tree Growth Record ➔
-                </Text>
-              </TouchableOpacity>
 
               {/* Institutional Footer */}
               <View style={styles.publicFooter}>
