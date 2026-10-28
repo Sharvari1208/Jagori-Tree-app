@@ -35,14 +35,16 @@ jobs:
           EXPO_PUBLIC_ADMIN_PIN: '2026'
         run: npx expo prebuild --platform android --clean
 
-      - name: Build Android APK
+      - name: Build Standalone Android APK (Release)
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleRelease --no-daemon
+          mkdir -p ../dist-apk
+          cp app/build/outputs/apk/release/*.apk ../dist-apk/Jagori-Tree-Tracker.apk
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Jagori-Tree-Tracker-Android-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: dist-apk/Jagori-Tree-Tracker.apk
